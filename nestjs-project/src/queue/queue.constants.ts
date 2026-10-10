@@ -6,6 +6,10 @@ export const MAINTENANCE_QUEUE = 'maintenance';
 export const PROCESS_VIDEO_JOB = 'process-video';
 export const SWEEP_STALE_UPLOADS_JOB = 'sweep-stale-uploads';
 
+/** Job scheduler that triggers the stale-upload sweep (phase-03-videos/TD-16). */
+export const STALE_UPLOAD_SWEEP_SCHEDULER_ID = 'stale-upload-sweep';
+export const STALE_UPLOAD_SWEEP_EVERY_MS = 60 * 60 * 1000;
+
 export const PROCESSING_MAX_ATTEMPTS = 3;
 
 /**

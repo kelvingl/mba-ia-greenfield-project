@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 10/15 completed
+**SIs:** 11/15 completed
 
 ### SI-03.1 — Infra: Dependências, Namespaces de Configuração e Validação de Env
 - **Status:** completed
@@ -124,9 +124,14 @@
   - Os testes do processor usam o fixture de 2 s; não há teste com arquivo grande.
 
 ### SI-03.11 — Varredura de Uploads Parados (Job Scheduler na Fila maintenance)
-- **Status:** pending
-- **Tests:** —
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 290 passing na suíte `src` (era 280) e 69 e2e; novos: 2 unit do `MaintenanceProcessor`, 6 integração do `StaleUploadSweepService` (Postgres real), 2 integração do scheduler (Redis real); `tsc` exit 0
+- **Observations:**
+  - `markStaleUploads` também zera `upload_id` ao expirar o vídeo (o plano só pedia status e motivo): o multipart já não é mais completável e o campo deixa de apontar para um upload morto. Não apaga nada no storage; as partes órfãs expiram sozinhas pelo `MINIO_API_STALE_UPLOADS_EXPIRY=24h`.
+  - A corrida com o consumidor de eventos é coberta por teste: uma linha movida para `processing` antes da varredura não é tocada, porque a condição de status está no próprio `UPDATE`.
+  - O `MaintenanceModule` precisou importar o `QueueModule`: a falha só apareceu ao subir o `WorkerModule` inteiro (o spec do scheduler isolado já injetava a fila), então o teste de boot do worker foi quem pegou.
+  - Novas constantes `STALE_UPLOAD_SWEEP_SCHEDULER_ID`/`EVERY_MS` em `queue.constants.ts` e `STALE_UPLOAD_MAX_AGE_HOURS` em `videos.constants.ts`.
+  - O scheduler do ambiente de dev (prefixo `bull`) passa a ser registrado pelo container `video-worker` real; verificado nos logs que ele sobe com o `MaintenanceModule`.
 
 ### SI-03.12 — Endpoints de Status, Playback (Streaming) e Download
 - **Status:** pending

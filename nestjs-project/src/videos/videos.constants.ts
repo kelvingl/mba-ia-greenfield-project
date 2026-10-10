@@ -42,3 +42,6 @@ export const MAX_PART_URLS_PER_REQUEST = 100;
 
 /** S3 allows at most 10 000 parts; 10 GiB / 64 MiB needs only 160. */
 export const MAX_UPLOAD_PARTS = 10_000;
+
+/** A draft still `uploading` after this long is abandoned (TD-07 / TD-16). */
+export const STALE_UPLOAD_MAX_AGE_HOURS = 24;

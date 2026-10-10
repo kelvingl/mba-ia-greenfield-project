@@ -8,6 +8,7 @@ import queueConfig from './config/queue.config';
 import storageConfig from './config/storage.config';
 import { QueueModule } from './queue/queue.module';
 import { StorageModule } from './storage/storage.module';
+import { MaintenanceModule } from './videos/maintenance/maintenance.module';
 import { VideoProcessingModule } from './videos/processing/video-processing.module';
 
 /**
@@ -39,6 +40,7 @@ import { VideoProcessingModule } from './videos/processing/video-processing.modu
     StorageModule,
     QueueModule,
     VideoProcessingModule,
+    MaintenanceModule,
   ],
 })
 export class WorkerModule {}
