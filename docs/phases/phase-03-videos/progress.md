@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 4/15 completed
+**SIs:** 5/15 completed
 
 ### SI-03.1 — Infra: Dependências, Namespaces de Configuração e Validação de Env
 - **Status:** completed
@@ -51,9 +51,16 @@
   - **PENDÊNCIA de lint (anterior):** 2 erros em `env.validation.integration-spec.ts` (já registrados no SI-03.1).
 
 ### SI-03.5 — Entidade Video, Migration CreateVideos e Gerador de public_id
-- **Status:** pending
-- **Tests:** —
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 11 novos passing (8 do módulo `videos`: 5 de integração da entidade + 2 do `public-id` + 1 de módulo; 3 do spec de migrations, que cobre as 3 migrations). Suíte `src` completa: 33 suites, 186 testes. E2E: 3 suites, 52 testes. `tsc` com 0.
+- **Observations:**
+  - **Migration gerada pela CLI** (`migration:generate`, como exige `.claude/rules/typeorm-migrations.md`): `1791667207602-CreateVideos.ts`, com o diff contendo só `videos` (enum `video_processing_status`, FK para `channels`, índices `(channel_id)`, `(processing_status, created_at)` e a unicidade de `public_id`). Formatada pelo ESLint/Prettier do projeto.
+  - **Teste de entidade contra o esquema real:** usa `synchronize: false`, ou seja, valida a tabela criada pela migration. Os specs de entidade existentes usam `synchronize: true` no banco compartilhado, o que criaria `videos` antes da migration e a faria falhar.
+  - **Defeito antigo do spec de migrations corrigido** (era pendência do SI-03.4): ele derrubava as tabelas mas deixava os tipos enum, e fazia os `DROP TABLE ... CASCADE` em paralelo. Agora derruba as tabelas em sequência (filhas primeiro), remove os enums e foi repetido 4 vezes seguidas sem falha. Isso eliminou também o travamento do Jest na falha do `beforeAll`.
+  - `cleanAllTables` agora apaga `videos` primeiro (a FK com `channels` quebraria os specs que limpam canais).
+  - **Ação 4 do plano adiada:** registrar `Video` no `WorkerModule` não tem efeito até existir um consumidor do repositório; será feito no SI-03.10, quando o processor precisar do `Repository<Video>`.
+  - `Channel` não ganhou lado inverso da relação, como definido no Data Model do plano.
+  - **PENDÊNCIA DE LINT (anterior e fora do escopo):** `eslint` no projeto inteiro dá 190 problemas (150 erros, 40 avisos) em 11 arquivos já existentes (ex.: `auth.service.spec.ts`, `auth.service.integration-spec.ts`, `create-test-data-source.ts`, `env.validation.integration-spec.ts`). O número é idêntico antes e depois deste SI, e os arquivos novos estão limpos. Como a DoD exige `npm run lint` passando, isso precisa de uma decisão antes do fechamento.
 
 ### SI-03.6 — Endpoint POST /videos: Pré-cadastro do Rascunho e Início do Multipart
 - **Status:** pending
