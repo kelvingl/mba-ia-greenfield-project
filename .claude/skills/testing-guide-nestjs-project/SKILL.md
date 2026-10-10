@@ -14,7 +14,7 @@ description: >
 
 This guide helps you decide **what to test**, at **which layer**, and **how to set up tests** for each type of artifact in `nestjs-project`. When working on a specific artifact type, read the corresponding guide in `artifacts/` for the complete recipe. Supporting references (mock strategies, file conventions, gotchas) are in `references/`.
 
-Artifact types covered: entities, services, controllers, modules, DTOs, guards, strategies, pipes, interceptors, filters, middleware. For anticipated types not yet in the project, see `artifacts/future-types.md`.
+Artifact types covered: entities, services, controllers, modules, DTOs, guards, strategies, pipes, interceptors, filters, middleware, queue processors & job schedulers. For anticipated types not yet in the project, see `artifacts/future-types.md`.
 
 ## 1. Testability Foundations
 
@@ -37,7 +37,8 @@ NestJS's DI container makes testing natural — `Test.createTestingModule()` let
 - Services with branching logic (e.g., conditional flows for registration, login, password reset)
 - Entity constraints and defaults — unique indexes, `select: false` fields, `@CreateDateColumn` behavior, cascade rules
 - Service-to-database contracts — repository queries, TypeORM relation loading, transaction boundaries
-- Service-to-external-system contracts — local storage uploads, SMTP sends via Mailpit, queue publishing
+- Service-to-external-system contracts — object storage via MinIO (S3 API, presigned URLs), SMTP sends via Mailpit, BullMQ job publishing on real Redis
+- Queue processors — error classification (`UnrecoverableError` vs retryable), retry policy as configured, terminal-failure hook, job scheduler registration
 - Module DI wiring — every module with configured imports (`TypeOrmModule.forFeature()`, `JwtModule.register()`, `BullModule.registerQueue()`)
 - Guard authorization logic — role checks, ownership verification, token validation flows
 - Exception filter error mapping — domain exceptions to HTTP responses
@@ -67,7 +68,9 @@ When implementing a new feature, use this checklist to ensure all artifacts have
 | Service with branching + DB | Unit: branch logic (mock repo) + Integration: DB contract | `artifacts/services.md` |
 | Service with DB only (no branching) | Integration: DB contract | `artifacts/services.md` |
 | Service with configured lib (JWT, cache) | Unit: real lib with test config | `artifacts/services.md` |
-| Service with side-effect dep (email, storage) | Integration: real capture service (Mailpit) or local adapter | `artifacts/services.md` |
+| Service with side-effect dep (email, storage, queue) | Integration: real Mailpit / real MinIO (S3 API) / real Redis (BullMQ) | `artifacts/services.md` |
+| Queue processor (`@Processor` + `WorkerHost`) | Unit: error classification (mock collaborators) + Integration: real Redis worker (retries, `UnrecoverableError`, failed hook) | `artifacts/processors.md` |
+| Job scheduler (`upsertJobScheduler`) | Integration: registration on real Redis + scheduled handler called directly | `artifacts/processors.md` |
 | Module with configured imports | Unit: compilation test | `artifacts/modules.md` |
 | Controller | E2E only — do NOT write unit tests | `artifacts/controllers.md` |
 | DTO | E2E: one validation wiring test per endpoint | `artifacts/dtos.md` |
@@ -98,12 +101,14 @@ When creating or modifying an artifact, read the corresponding guide for the com
 | Interceptors | `*.interceptor.ts` | Unit and/or E2E | `artifacts/interceptors.md` |
 | Filters | `*.filter.ts` | Unit + E2E | `artifacts/filters.md` |
 | Middleware | `*.middleware.ts` | E2E | `artifacts/middleware.md` |
+| Queue processors & job schedulers | `*.processor.ts` | Unit + Integration (real Redis) | `artifacts/processors.md` |
 | Future types | — | — | `artifacts/future-types.md` |
 
 ## 5. Anti-patterns — Do NOT Do This
 
 - ❌ **Unit test controllers** — controllers are thin delegation layers; test via E2E only (see `artifacts/controllers.md`)
 - ❌ **Mock configured libs** (JwtService, CacheManager, ThrottlerGuard) — use real instances with test config; mocking hides configuration bugs (§1)
+- ❌ **Mock `S3Client` / BullMQ `Queue` / `Worker`** — run against real MinIO and Redis; signatures, path-style, retries, `UnrecoverableError` and job schedulers are server-side behaviour a mock cannot reproduce (see `references/external-systems.md`, `artifacts/processors.md`)
 - ❌ **Skip integration tests for services with DB access** — unit tests with mocked repos don't prove queries are correct (see `artifacts/services.md`)
 - ❌ **Skip module compilation tests** — TypeScript catches type errors but cannot catch DI wiring errors; a missing import only fails at runtime (see `artifacts/modules.md`)
 - ❌ **Use `repository.delete({})` for cleanup** — throws on empty criteria; use `dataSource.query('DELETE FROM table')` or `repository.clear()` (see `references/gotchas.md`)

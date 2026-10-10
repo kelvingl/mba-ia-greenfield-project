@@ -50,32 +50,13 @@ describe('UserRegisteredHandler', () => {
 
 ## Queue Consumers / Processors
 
-When the project adds queue processing (e.g., BullMQ for video transcoding):
-
-**What to test:**
-- Processor correctly handles job data
-- Error handling — failed jobs are retried or moved to dead letter queue
-- Side effects (DB updates, storage writes) occur as expected
-
-**Layer assignment:**
-- **Processor with business logic**: Unit (mock deps) + Integration (real DB/storage)
-- **Processor with only external system calls**: Integration (real systems)
-
-**Setup pattern:**
-```typescript
-// Test the process method directly
-describe('VideoProcessorConsumer', () => {
-  it('should update video status after processing', async () => {
-    const job = { data: { videoId: 'v1', filePath: '/tmp/video.mp4' } } as Job;
-    await processor.process(job);
-    // Assert video status updated in DB
-  });
-});
-```
+No longer a future type. BullMQ processors and job schedulers are covered in **`processors.md`**.
 
 ---
 
 ## Scheduled Tasks (Cron)
+
+Recurring work in this project uses **BullMQ job schedulers** (`phase-03-videos/TD-16`), covered in `processors.md`. The guidance below applies only if `@nestjs/schedule` is ever adopted for something else.
 
 If the project adds `@nestjs/schedule` for periodic tasks:
 
