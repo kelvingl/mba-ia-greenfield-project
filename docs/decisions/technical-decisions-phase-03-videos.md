@@ -69,6 +69,14 @@ _Subprojects in scope:_
 - 2026-10-10 — `**Libraries:**` field filled with the AWS SDK v3 packages the Recommendation already names (S3 client +
   presigner for multipart parts and GET URLs). Rationale: resolves validation IC-3 — the empty field kept these
   dependencies out of library-refs.md and doc lookups. Decision A unchanged.
+- 2026-10-10 — Aligned with the challenge brief (`docs/phases/phase-03-videos/enunciado.md`, "Sobre o object storage").
+  - The storage server is **given, not open**: S3-compatible, with MinIO locally in Docker and S3 in production. Options B/C stay recorded only as a contingency if the pinned MinIO image becomes unusable.
+  - What this TD fixes is **how storage is used**: a **single bucket** (name from env), with keys organized by prefix:
+    - `originals/{videoId}/source{ext}`: the kept upload. Download source; bucket notification scope (TD-06 B).
+    - `playback/{videoId}.mp4`: the streaming source (TD-10 B).
+    - `thumbnails/{videoId}.jpg`: under the public-read prefix (TD-11 D).
+  - Uploads are presigned multipart (TD-04 A).
+  - Rationale: the brief states the decision is "*como* usá-lo (organização de buckets/chaves, upload pré-assinado), não *qual* storage". Decision A unchanged.
 
 ---
 
@@ -651,7 +659,7 @@ _Subprojects in scope:_
   - `next/image` `remotePatterns` for the thumbnail host (TD-11);
   - **the E2E strategy for browser→storage traffic.** Today's E2E rule fakes only upstream NestJS via server-side MSW, and direct PUTs to storage are not covered by that mechanism.
 - **Dependencies between TDs:** TD-04 → TD-06, TD-07 (API-mediated multipart; under TD-06 B the size check lives in the event consumer — see TD-06/TD-07 Revisions). TD-02 + TD-05 → TD-15. TD-10 → TD-09 (if TD-10 = A, TD-09 collapses to A). TD-01 + TD-10 → TD-11. TD-02 → TD-03 (processor shape). TD-05 → TD-14 (polling stop condition). TD-02 + TD-03 + TD-07 → TD-16 (sweep mechanism; transition out of `uploading` must be conditional because it races the TD-06 B consumer).
-- **Testing guide revision required.** `.claude/skills/testing-guide-nestjs-project/references/external-systems.md` § "Object Storage — Local Filesystem" contradicts TD-01 A/B/C + TD-04 A. If those are accepted, `/plan-build` must include a task to rewrite that section ("real S3-compatible server in Docker, bucket cleaned between tests") and to concretize the queue section with the TD-02 choice. Integration tests then hit the real storage and Redis containers, consistent with the existing real-DB + Mailpit approach.
+- **Testing guide revision required.** _Done 2026-10-10 (PR #1): the guide now covers MinIO via the S3 API and BullMQ on real Redis, plus `artifacts/processors.md`._ Original note: `.claude/skills/testing-guide-nestjs-project/references/external-systems.md` § "Object Storage — Local Filesystem" contradicts TD-01 A/B/C + TD-04 A. If those are accepted, `/plan-build` must include a task to rewrite that section ("real S3-compatible server in Docker, bucket cleaned between tests") and to concretize the queue section with the TD-02 choice. Integration tests then hit the real storage and Redis containers, consistent with the existing real-DB + Mailpit approach.
 - **New env keys (cross-component contract).** Storage (`S3_ENDPOINT`, `S3_PUBLIC_ENDPOINT`, `S3_REGION`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, bucket name(s)) queue (`REDIS_HOST`, `REDIS_PORT`) and storage-event webhook (a shared token, e.g. `STORAGE_WEBHOOK_TOKEN`, per TD-06 Revision) keys go into `env.validation.ts` (Joi), new `registerAs` namespaces, `compose.yaml` and `.env.example`. Exact names are an implementation detail; the internal-vs-public endpoint split is part of TD-11. Per root `CLAUDE.md`, internal hosts use Compose service names; only `S3_PUBLIC_ENDPOINT` is a host-reachable URL (published port), because the browser consumes it.
 - **Compose topology.** `nestjs-project/compose.yaml` gains the storage service (+ init step for bucket, CORS, lifecycle, the public-read thumbnail prefix policy and the `notify_webhook` target pointing at the API by service name — TD-06 Revision), `redis` (TD-02 A) and `video-worker` (TD-03 A). The `next-frontend` stack stays separate; the browser reaches storage through the published host port.
 - **Bucket CORS** must allow the FE origin (`http://localhost:3001` in dev), the methods `PUT`/`GET`/`HEAD`, and expose `ETag` (required by TD-04 A for multipart completion).

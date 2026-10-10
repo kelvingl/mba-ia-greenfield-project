@@ -1,5 +1,11 @@
 # Plano — `/research` Fase 03 (Upload e Processamento de Vídeos), fatia backend
 
+> **Registro histórico da sessão de research, não a fonte das decisões.** A tabela abaixo traz as *recomendações* daquele momento. As escolhas finais e as revisões posteriores estão em `docs/decisions/technical-decisions-phase-03-videos.md`. Lá estão, por exemplo:
+> - TD-06 decidida como **B** (eventos do storage) e TD-08 como **B** (`fluent-ffmpeg`), divergindo das recomendações;
+> - TD-16 (varredura de uploads parados), adicionada depois via `plan-validate`.
+>
+> O plano executável é `phase-03-videos.md`.
+
 ## Contexto
 
 O usuário rodou `/research fase 3`. A skill gera um documento de decisões técnicas (TDs) com opções, trade-offs e recomendação; o usuário decide depois e o pipeline segue `/plan-context → /plan-validate → /plan-resolve`.
