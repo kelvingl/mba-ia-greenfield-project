@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 6/15 completed
+**SIs:** 7/15 completed
 
 ### SI-03.1 — Infra: Dependências, Namespaces de Configuração e Validação de Env
 - **Status:** completed
@@ -76,9 +76,16 @@
   - `utilitário isUniqueViolationOnColumn` criado em `common/database/pg-errors.ts`; o `ChannelsService` tem uma cópia privada equivalente, que deixei como está (fora do escopo).
 
 ### SI-03.7 — Endpoints do Plano de Controle do Upload: URLs de Parte, Partes Enviadas e Conclusão
-- **Status:** pending
-- **Tests:** —
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 24 novos passing: 11 unit do serviço, 3 de integração (Postgres + MinIO) e 7 e2e (spec `videos-upload.plan.md`, 7 cenários, ACs #1–#7). Suíte `src`: 36 suites, 223 testes. E2E: 5 suites, 64 testes. `tsc` com 0 e os arquivos novos sem lint.
+- **Observations:**
+  - **Rotas** `POST /videos/:publicId/upload/part-urls` (200), `GET /videos/:publicId/upload/parts` (200) e `POST /videos/:publicId/upload/complete` (202), todas documentadas com OpenAPI. `complete` só finaliza o multipart no storage: não enfileira nem verifica tamanho, e o teste e2e confere que a fila fica vazia.
+  - **Não-dono e inexistente são indistinguíveis:** a busca filtra por `channel.user_id` do chamador e ambos respondem `404 VIDEO_NOT_FOUND`.
+  - O e2e envia a peça de **64 MiB** do spec de verdade ao MinIO (~0,7 s por teste) e confere o tamanho final do objeto (`64 MiB + 1 KiB`).
+  - `StorageService.partUrlTtlSeconds` foi exposto para a resposta carregar `expires_in` sem o serviço de vídeos ler a config de storage.
+  - **Armadilha do supertest registrada no teste:** criar várias requisições antes de aguardá-las faz a primeira fechar o servidor efêmero compartilhado (`ECONNREFUSED`); os testes de acesso as constroem sob demanda.
+  - **Limitação conhecida:** repetir `complete` depois de um upload já finalizado retorna `400 INVALID_UPLOAD_PARTS` (o storage responde `NoSuchUpload`, que mapeei junto com os demais erros de partes). Como o gatilho do processamento é o evento do storage (TD-06 B), uma segunda chamada não causa dano, mas a resposta não é idempotente. Se for desejável, vale decidir isso no SI-03.8 ou numa revisão da TD.
+  - Só `InvalidPart` foi exercitado contra o MinIO real; os outros nomes de erro mapeados (`InvalidPartOrder`, `EntityTooSmall`, `NoSuchUpload`) estão cobertos só no nível unitário.
 
 ### SI-03.8 — Webhook de Eventos do Storage, Verificação de Tamanho e Enfileiramento
 - **Status:** pending

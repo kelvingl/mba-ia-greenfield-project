@@ -56,6 +56,11 @@ export class StorageService {
     private readonly config: ConfigType<typeof storageConfig>,
   ) {}
 
+  /** Seconds a presigned upload-part URL stays valid. */
+  get partUrlTtlSeconds(): number {
+    return this.config.partUrlTtlSeconds;
+  }
+
   async createMultipartUpload(
     key: string,
     contentType: string,

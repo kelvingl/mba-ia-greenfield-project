@@ -37,3 +37,8 @@ export const UPLOAD_PART_SIZE_BYTES = 67_108_864;
 export const TITLE_MAX_LENGTH = 100;
 export const FILENAME_MAX_LENGTH = 255;
 export const DEFAULT_VIDEO_TITLE = 'Untitled video';
+
+export const MAX_PART_URLS_PER_REQUEST = 100;
+
+/** S3 allows at most 10 000 parts; 10 GiB / 64 MiB needs only 160. */
+export const MAX_UPLOAD_PARTS = 10_000;
