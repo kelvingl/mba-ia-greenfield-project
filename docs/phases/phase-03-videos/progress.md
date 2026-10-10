@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 1/15 completed
+**SIs:** 2/15 completed
 
 ### SI-03.1 — Infra: Dependências, Namespaces de Configuração e Validação de Env
 - **Status:** completed
@@ -14,9 +14,17 @@
   - Os 4 critérios de aceite foram conferidos: chaves ausentes falham no Joi nomeando a chave, `partUrlTtlSeconds = 3600`, pin exato e hosts internos sem `localhost`.
 
 ### SI-03.2 — Infra: Docker Compose com MinIO, Redis e FFmpeg na Imagem
-- **Status:** pending
-- **Tests:** —
-- **Observations:** none
+- **Status:** completed
+- **Tests:** no tests (Infra); critérios de aceite verificados contra a stack real
+- **Observations:**
+  - **Imagem do MinIO:** `minio/minio` e `minio/mc` não existem mais no Docker Hub, e o Quay exige login. Usei as imagens gratuitas do Chainguard **fixadas por digest** (`minio` e `minio-client`), alternativa já prevista na TD-01. O servidor resolvido é `RELEASE.2026-09-22`.
+  - **`minio-init` não usa `mc`:** as imagens do Chainguard são distroless (sem `/bin/sh`), então não dá para encadear comandos `mc`. O init é `scripts/minio-init.mjs` (AWS SDK, já instalado), rodado numa instância da imagem do projeto. Cria o bucket e aplica a policy de leitura anônima só em `thumbnails/`; é idempotente (reexecução confirmada).
+  - **CORS e lifecycle diferem do plano, por limitação do MinIO** (testado contra o servidor):
+    - CORS por bucket retorna `NotImplemented`. Configurei CORS no servidor (`MINIO_API_CORS_ALLOW_ORIGIN=http://localhost:3001`). Verificado: origem aceita e `ETag` exposto, o que a TD-04 exige.
+    - A regra de lifecycle `AbortIncompleteMultipartUpload` é rejeitada (`InvalidArgument`), então o critério "regra aparece no bucket" não é atingível no MinIO. O equivalente é `MINIO_API_STALE_UPLOADS_EXPIRY=24h` (limpeza a cada 6 h). Em S3 de produção a regra de lifecycle da TD-07 continua aplicável.
+  - **Sem healthcheck no `minio`:** a imagem não tem shell nem `curl`. O `nestjs-api` espera o `minio-init` concluir com sucesso, que serve de prova de prontidão. `redis` tem healthcheck `redis-cli ping` e está `healthy`.
+  - FFmpeg 5.1.9 instalado na imagem (`apt`), e `ffprobe -version` sai com 0.
+  - Os serviços `video-worker` e a notificação de bucket (`notify_webhook`) ficam para o SI-03.4 e o SI-03.8, como no plano.
 
 ### SI-03.3 — Módulo de Storage sobre a API S3
 - **Status:** pending

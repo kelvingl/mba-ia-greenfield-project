@@ -12,6 +12,10 @@ services:
         condition: service_healthy
       mailpit:
         condition: service_started
+      minio-init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
 
   db:
     image: postgres:17
@@ -33,4 +37,54 @@ services:
       - "1025:1025"
       - "8025:8025"
 
+  # Object storage (dev/test). Chainguard image pinned by digest because the
+  # official minio/minio images are no longer published (phase-03-videos/TD-01).
+  minio:
+    image: cgr.dev/chainguard/minio@sha256:7df55d002b698e4494a131b848dd553361bbe58b7e19f62d9623c29af1ba9ccf
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      - MINIO_ROOT_USER=${S3_ACCESS_KEY_ID}
+      - MINIO_ROOT_PASSWORD=${S3_SECRET_ACCESS_KEY}
+      # MinIO rejects per-bucket CORS, so it is configured server-wide. MinIO
+      # already exposes ETag, which multipart completion requires (TD-04).
+      - MINIO_API_CORS_ALLOW_ORIGIN=http://localhost:3001
+      # Equivalent of the AbortIncompleteMultipartUpload lifecycle rule, which
+      # MinIO does not accept: abandoned multipart uploads expire after 24h.
+      - MINIO_API_STALE_UPLOADS_EXPIRY=24h
+    volumes:
+      - minio-data:/data
 
+  # One-shot bootstrap: bucket + public-read policy on thumbnails/ only.
+  minio-init:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    command: ["node", "scripts/minio-init.mjs"]
+    volumes:
+      - .:/home/node/app
+    environment:
+      - S3_ENDPOINT=${S3_ENDPOINT}
+      - S3_REGION=${S3_REGION}
+      - S3_ACCESS_KEY_ID=${S3_ACCESS_KEY_ID}
+      - S3_SECRET_ACCESS_KEY=${S3_SECRET_ACCESS_KEY}
+      - S3_BUCKET=${S3_BUCKET}
+    depends_on:
+      minio:
+        condition: service_started
+    restart: "no"
+
+  redis:
+    image: redis:7.4-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  minio-data:
