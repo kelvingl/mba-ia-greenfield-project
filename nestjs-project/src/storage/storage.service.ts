@@ -63,6 +63,11 @@ export class StorageService {
     return this.config.partUrlTtlSeconds;
   }
 
+  /** Seconds a presigned playback/download URL stays valid. */
+  get deliveryUrlTtlSeconds(): number {
+    return this.config.deliveryUrlTtlSeconds;
+  }
+
   async createMultipartUpload(
     key: string,
     contentType: string,

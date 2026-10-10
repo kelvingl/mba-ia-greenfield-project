@@ -8,6 +8,7 @@ import {
   InvalidUploadPartsException,
   InvalidUploadStateException,
   VideoNotFoundException,
+  VideoNotReadyException,
 } from '../common/exceptions/domain.exception';
 import { InvalidUploadPartsError } from '../storage/storage.errors';
 import { StorageService } from '../storage/storage.service';
@@ -39,6 +40,9 @@ describe('VideosService', () => {
     listParts: jest.fn(),
     completeMultipartUpload: jest.fn(),
     partUrlTtlSeconds: 3600,
+    deliveryUrlTtlSeconds: 900,
+    publicObjectUrl: jest.fn(),
+    presignGet: jest.fn(),
   };
   const channels = { findByUserId: jest.fn() };
   let service: VideosService;
@@ -353,6 +357,114 @@ describe('VideosService', () => {
           'network',
         );
       });
+    });
+  });
+
+  describe('status and delivery', () => {
+    const video = (overrides: Partial<Video> = {}): Partial<Video> => ({
+      id: 'video-1',
+      title: 'Minha "aula"',
+      processing_status: VideoProcessingStatus.READY,
+      original_key: 'originals/video-1/source.webm',
+      playback_key: 'playback/video-1.mp4',
+      thumbnail_key: 'thumbnails/video-1.jpg',
+      ...overrides,
+    });
+
+    describe('getOwnedVideo', () => {
+      it('should expose the public thumbnail URL once the video is ready', async () => {
+        repo.findOne.mockResolvedValue(video());
+        storage.publicObjectUrl.mockReturnValue(
+          'http://s/thumbnails/video-1.jpg',
+        );
+
+        const result = await service.getOwnedVideo('u', 'p');
+
+        expect(storage.publicObjectUrl).toHaveBeenCalledWith(
+          'thumbnails/video-1.jpg',
+        );
+        expect(result.thumbnailUrl).toBe('http://s/thumbnails/video-1.jpg');
+      });
+
+      it.each([
+        VideoProcessingStatus.UPLOADING,
+        VideoProcessingStatus.PROCESSING,
+        VideoProcessingStatus.FAILED,
+      ])(
+        'should have no thumbnail URL while the video is %s',
+        async (status) => {
+          repo.findOne.mockResolvedValue(
+            video({ processing_status: status, thumbnail_key: null }),
+          );
+
+          const result = await service.getOwnedVideo('u', 'p');
+
+          expect(result.thumbnailUrl).toBeNull();
+          expect(storage.publicObjectUrl).not.toHaveBeenCalled();
+        },
+      );
+
+      it('should answer not found for a missing or foreign video', async () => {
+        repo.findOne.mockResolvedValue(null);
+
+        await expect(service.getOwnedVideo('u', 'p')).rejects.toBeInstanceOf(
+          VideoNotFoundException,
+        );
+      });
+    });
+
+    describe.each([
+      ['getPlaybackUrl', (s: VideosService) => s.getPlaybackUrl('u', 'p')],
+      ['getDownloadUrl', (s: VideosService) => s.getDownloadUrl('u', 'p')],
+    ])('%s', (_name, call) => {
+      it.each([
+        VideoProcessingStatus.UPLOADING,
+        VideoProcessingStatus.PROCESSING,
+        VideoProcessingStatus.FAILED,
+      ])('should refuse a video that is %s', async (status) => {
+        repo.findOne.mockResolvedValue(video({ processing_status: status }));
+
+        await expect(call(service)).rejects.toBeInstanceOf(
+          VideoNotReadyException,
+        );
+        expect(storage.presignGet).not.toHaveBeenCalled();
+      });
+
+      it('should answer not found for a missing or foreign video', async () => {
+        repo.findOne.mockResolvedValue(null);
+
+        await expect(call(service)).rejects.toBeInstanceOf(
+          VideoNotFoundException,
+        );
+      });
+    });
+
+    it('should sign the playback file and report the delivery TTL', async () => {
+      repo.findOne.mockResolvedValue(video());
+      storage.presignGet.mockResolvedValue('https://s/playback');
+
+      const result = await service.getPlaybackUrl('u', 'p');
+
+      expect(storage.presignGet).toHaveBeenCalledWith(
+        'playback/video-1.mp4',
+        {},
+      );
+      expect(result).toEqual({ url: 'https://s/playback', expiresIn: 900 });
+    });
+
+    it('should sign the original as an attachment named after a sanitized title', async () => {
+      repo.findOne.mockResolvedValue(video());
+      storage.presignGet.mockResolvedValue('https://s/original');
+
+      const result = await service.getDownloadUrl('u', 'p');
+
+      expect(storage.presignGet).toHaveBeenCalledWith(
+        'originals/video-1/source.webm',
+        {
+          responseContentDisposition: 'attachment; filename="Minha aula.webm"',
+        },
+      );
+      expect(result).toEqual({ url: 'https://s/original', expiresIn: 900 });
     });
   });
 });

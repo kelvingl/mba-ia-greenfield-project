@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 11/15 completed
+**SIs:** 12/15 completed
 
 ### SI-03.1 — Infra: Dependências, Namespaces de Configuração e Validação de Env
 - **Status:** completed
@@ -134,9 +134,14 @@
   - O scheduler do ambiente de dev (prefixo `bull`) passa a ser registrado pelo container `video-worker` real; verificado nos logs que ele sobe com o `MaintenanceModule`.
 
 ### SI-03.12 — Endpoints de Status, Playback (Streaming) e Download
-- **Status:** pending
-- **Tests:** —
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 313 passing na suíte `src` (era 290) e 75 e2e (era 69); novos: 4 unit de `attachmentDisposition`, 17 unit do serviço, 4 integração (Postgres + MinIO), 6 e2e de `specs/videos-delivery.plan.md`; `tsc` exit 0
+- **Observations:**
+  - O `Content-Disposition` ganhou um helper puro (`content-disposition.ts`): remove aspas, barra invertida, `/` e caracteres de controle; para títulos com acento mantém `filename="<fallback ASCII>"` e acrescenta `filename*=UTF-8''<título codificado>` (RFC 5987). O plano só falava em sanitizar o nome, mas um título como "Introdução" iria cru para um header; para títulos ASCII o valor é exatamente `attachment; filename="<title>.<ext>"` do critério de aceite. A extensão vem da chave do original.
+  - `StorageService.deliveryUrlTtlSeconds` (getter novo) alimenta `expires_in` de playback e download.
+  - Playback e download tratam `ready` sem `playback_key` como não pronto (`VIDEO_NOT_READY`) em vez de assinar uma chave nula.
+  - Criei `VideoResponseDto` e `MediaUrlResponseDto` já com os decoradores de OpenAPI no controller (padrão das rotas do SI-03.7); o SI-03.13 só precisa conferir/exportar.
+  - Fora do plano: nenhum. O e2e confere o `thumbnail_url` anônimo (200, `image/jpeg`) contra o bucket de teste, que recebe a mesma política pública do bucket real.
 
 ### SI-03.13 — Documentação OpenAPI dos Endpoints de Vídeo e Sincronização do Contrato
 - **Status:** pending

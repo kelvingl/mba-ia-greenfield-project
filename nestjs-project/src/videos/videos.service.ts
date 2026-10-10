@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { parse } from 'node:path';
+import { extname, parse } from 'node:path';
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -11,6 +11,7 @@ import {
   InvalidUploadPartsException,
   InvalidUploadStateException,
   VideoNotFoundException,
+  VideoNotReadyException,
 } from '../common/exceptions/domain.exception';
 import { originalKey } from '../storage/storage-keys';
 import { InvalidUploadPartsError } from '../storage/storage.errors';
@@ -19,6 +20,7 @@ import {
   StorageService,
   UploadedPart,
 } from '../storage/storage.service';
+import { attachmentDisposition } from './content-disposition';
 import { CreateVideoDto } from './dto/create-video.dto';
 import { Video } from './entities/video.entity';
 import { generatePublicId } from './public-id';
@@ -168,6 +170,67 @@ export class VideosService {
       where: { public_id: publicId, channel: { user_id: userId } },
     });
     if (!video) throw new VideoNotFoundException();
+    return video;
+  }
+
+  /** The owner's view of a video, for polling its processing status. */
+  async getOwnedVideo(
+    userId: string,
+    publicId: string,
+  ): Promise<{ video: Video; thumbnailUrl: string | null }> {
+    const video = await this.findOwnedOrFail(userId, publicId);
+    const thumbnailUrl =
+      video.processing_status === VideoProcessingStatus.READY &&
+      video.thumbnail_key
+        ? this.storage.publicObjectUrl(video.thumbnail_key)
+        : null;
+    return { video, thumbnailUrl };
+  }
+
+  /** Short-lived URL to stream `playback.mp4` with HTTP Range requests. */
+  async getPlaybackUrl(
+    userId: string,
+    publicId: string,
+  ): Promise<{ url: string; expiresIn: number }> {
+    const video = await this.findReadyOrFail(userId, publicId);
+    return this.signDelivery(video.playback_key as string);
+  }
+
+  /** Short-lived URL that downloads the original file as an attachment. */
+  async getDownloadUrl(
+    userId: string,
+    publicId: string,
+  ): Promise<{ url: string; expiresIn: number }> {
+    const video = await this.findReadyOrFail(userId, publicId);
+    return this.signDelivery(video.original_key, {
+      responseContentDisposition: attachmentDisposition(
+        video.title,
+        extname(video.original_key),
+      ),
+    });
+  }
+
+  private async signDelivery(
+    key: string,
+    options: { responseContentDisposition?: string } = {},
+  ): Promise<{ url: string; expiresIn: number }> {
+    return {
+      url: await this.storage.presignGet(key, options),
+      expiresIn: this.storage.deliveryUrlTtlSeconds,
+    };
+  }
+
+  private async findReadyOrFail(
+    userId: string,
+    publicId: string,
+  ): Promise<Video> {
+    const video = await this.findOwnedOrFail(userId, publicId);
+    if (
+      video.processing_status !== VideoProcessingStatus.READY ||
+      !video.playback_key
+    ) {
+      throw new VideoNotReadyException();
+    }
     return video;
   }
 

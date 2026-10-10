@@ -10,6 +10,7 @@ import {
   InvalidUploadPartsException,
   InvalidUploadStateException,
   VideoNotFoundException,
+  VideoNotReadyException,
 } from '../common/exceptions/domain.exception';
 import queueConfig from '../config/queue.config';
 import storageConfig from '../config/storage.config';
@@ -24,7 +25,7 @@ import {
   TEST_BUCKET,
   useTestBucket,
 } from '../test/s3';
-import { HeadObjectCommand } from '@aws-sdk/client-s3';
+import { HeadObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import { User } from '../users/entities/user.entity';
 import { CreateVideoDto } from './dto/create-video.dto';
 import { Video } from './entities/video.entity';
@@ -58,7 +59,10 @@ describe('VideosService (integration, real Postgres + MinIO)', () => {
     process.env.S3_PUBLIC_ENDPOINT = process.env.S3_ENDPOINT;
     module = await Test.createTestingModule({
       imports: [
-        ConfigModule.forRoot({ isGlobal: true, load: [storageConfig, queueConfig] }),
+        ConfigModule.forRoot({
+          isGlobal: true,
+          load: [storageConfig, queueConfig],
+        }),
         TypeOrmModule.forRoot(
           createTestDataSource(
             [User, Channel, Video, RefreshToken, VerificationToken],
@@ -221,6 +225,93 @@ describe('VideosService (integration, real Postgres + MinIO)', () => {
       await expect(
         service.signUploadParts(userId, video.public_id, [1]),
       ).rejects.toBeInstanceOf(InvalidUploadStateException);
+    });
+  });
+
+  describe('status and delivery', () => {
+    const ORIGINAL = Buffer.alloc(4096, 7);
+
+    /** A `ready` video with its three objects in the test bucket. */
+    async function seedReadyVideo(title = 'Minha aula') {
+      const { video } = await service.createDraft(userId, dto({ title }));
+      const put = (key: string, body: Buffer) =>
+        internalS3Client.send(
+          new PutObjectCommand({ Bucket: TEST_BUCKET, Key: key, Body: body }),
+        );
+      await put(video.original_key, ORIGINAL);
+      await put(`playback/${video.id}.mp4`, Buffer.alloc(4096, 1));
+      await put(`thumbnails/${video.id}.jpg`, Buffer.from('jpeg'));
+      await videos.update(
+        { id: video.id },
+        {
+          processing_status: VideoProcessingStatus.READY,
+          upload_id: null,
+          playback_key: `playback/${video.id}.mp4`,
+          thumbnail_key: `thumbnails/${video.id}.jpg`,
+          duration_seconds: 2,
+          width: 640,
+          height: 360,
+        },
+      );
+      return videos.findOneByOrFail({ id: video.id });
+    }
+
+    it('should report a ready video with a thumbnail URL on the public endpoint', async () => {
+      const ready = await seedReadyVideo();
+
+      const { thumbnailUrl } = await service.getOwnedVideo(
+        userId,
+        ready.public_id,
+      );
+
+      expect(thumbnailUrl).toBe(
+        `${process.env.S3_PUBLIC_ENDPOINT}/${TEST_BUCKET}/thumbnails/${ready.id}.jpg`,
+      );
+    });
+
+    it('should serve the playback URL by Range with 206 Partial Content', async () => {
+      const ready = await seedReadyVideo();
+
+      const { url, expiresIn } = await service.getPlaybackUrl(
+        userId,
+        ready.public_id,
+      );
+      const res = await fetch(url, { headers: { Range: 'bytes=0-1023' } });
+
+      expect(expiresIn).toBeGreaterThan(0);
+      expect(new URL(url).origin).toBe(
+        new URL(process.env.S3_PUBLIC_ENDPOINT as string).origin,
+      );
+      expect(res.status).toBe(206);
+      expect(res.headers.get('content-range')).toBe('bytes 0-1023/4096');
+    });
+
+    it('should deliver the original as an attachment named after the title', async () => {
+      const ready = await seedReadyVideo('Introdução ao Nest');
+
+      const { url } = await service.getDownloadUrl(userId, ready.public_id);
+      const res = await fetch(url);
+
+      expect(res.status).toBe(200);
+      const disposition = res.headers.get('content-disposition') as string;
+      expect(disposition).toMatch(
+        /^attachment; filename="Introducao ao Nest\.mp4"/,
+      );
+      expect(disposition).toContain(
+        "filename*=UTF-8''Introdu%C3%A7%C3%A3o%20ao%20Nest.mp4",
+      );
+      expect(Buffer.from(await res.arrayBuffer())).toEqual(ORIGINAL);
+    });
+
+    it('should refuse delivery of a video that is not ready', async () => {
+      const { video } = await service.createDraft(userId, dto());
+
+      await expect(
+        service.getPlaybackUrl(userId, video.public_id),
+      ).rejects.toBeInstanceOf(VideoNotReadyException);
+      await expect(
+        service.getDownloadUrl(userId, video.public_id),
+      ).rejects.toBeInstanceOf(VideoNotReadyException);
     });
   });
 });

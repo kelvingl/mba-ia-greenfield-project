@@ -28,6 +28,10 @@ import {
   PartUrlsResponseDto,
   UploadedPartsResponseDto,
 } from './dto/upload-responses.dto';
+import {
+  MediaUrlResponseDto,
+  VideoResponseDto,
+} from './dto/video-responses.dto';
 import { VideosService } from './videos.service';
 
 // The upload flow signs many part URLs and is polled for status, so the
@@ -222,5 +226,125 @@ export class VideosController {
       public_id: video.public_id,
       processing_status: video.processing_status,
     };
+  }
+
+  @Get(':publicId')
+  @ApiOperation({
+    summary: 'Get a video and its processing status',
+    description:
+      'Owner-only. Poll this while the video is uploading or processing; the thumbnail URL appears once it is ready.',
+  })
+  @ApiParam({ name: 'publicId', description: 'Public id of the video' })
+  @ApiResponse({
+    status: 200,
+    description: 'The video and its processing status',
+    type: VideoResponseDto,
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Missing or invalid access token',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Video not found (or not owned by the caller)',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  async getVideo(
+    @CurrentUser() user: JwtPayload,
+    @Param('publicId') publicId: string,
+  ): Promise<VideoResponseDto> {
+    const { video, thumbnailUrl } = await this.videosService.getOwnedVideo(
+      user.sub,
+      publicId,
+    );
+    return {
+      public_id: video.public_id,
+      title: video.title,
+      processing_status: video.processing_status,
+      failure_reason: video.failure_reason,
+      published_at: video.published_at?.toISOString() ?? null,
+      duration_seconds: video.duration_seconds,
+      width: video.width,
+      height: video.height,
+      thumbnail_url: thumbnailUrl,
+      created_at: video.created_at.toISOString(),
+    };
+  }
+
+  @Get(':publicId/playback-url')
+  @ApiOperation({
+    summary: 'Get a streaming URL',
+    description:
+      'Owner-only. Returns a short-lived URL for the playable MP4; the player streams it with HTTP Range requests. Requires a ready video.',
+  })
+  @ApiParam({ name: 'publicId', description: 'Public id of the video' })
+  @ApiResponse({
+    status: 200,
+    description: 'Presigned playback URL',
+    type: MediaUrlResponseDto,
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Missing or invalid access token',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Video not found (or not owned by the caller)',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 409,
+    description: 'Video processing has not finished',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  async getPlaybackUrl(
+    @CurrentUser() user: JwtPayload,
+    @Param('publicId') publicId: string,
+  ): Promise<MediaUrlResponseDto> {
+    const { url, expiresIn } = await this.videosService.getPlaybackUrl(
+      user.sub,
+      publicId,
+    );
+    return { url, expires_in: expiresIn };
+  }
+
+  @Get(':publicId/download-url')
+  @ApiOperation({
+    summary: 'Get a download URL',
+    description:
+      'Owner-only. Returns a short-lived URL that downloads the original file as an attachment. Requires a ready video.',
+  })
+  @ApiParam({ name: 'publicId', description: 'Public id of the video' })
+  @ApiResponse({
+    status: 200,
+    description: 'Presigned download URL',
+    type: MediaUrlResponseDto,
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Missing or invalid access token',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Video not found (or not owned by the caller)',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 409,
+    description: 'Video processing has not finished',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  async getDownloadUrl(
+    @CurrentUser() user: JwtPayload,
+    @Param('publicId') publicId: string,
+  ): Promise<MediaUrlResponseDto> {
+    const { url, expiresIn } = await this.videosService.getDownloadUrl(
+      user.sub,
+      publicId,
+    );
+    return { url, expires_in: expiresIn };
   }
 }

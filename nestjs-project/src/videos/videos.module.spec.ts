@@ -15,7 +15,10 @@ describe('VideosModule', () => {
   it('should compile and expose the Video repository', async () => {
     const module = await Test.createTestingModule({
       imports: [
-        ConfigModule.forRoot({ isGlobal: true, load: [storageConfig, queueConfig] }),
+        ConfigModule.forRoot({
+          isGlobal: true,
+          load: [storageConfig, queueConfig],
+        }),
         TypeOrmModule.forRoot(
           createTestDataSource(
             [User, Channel, Video, RefreshToken, VerificationToken],
