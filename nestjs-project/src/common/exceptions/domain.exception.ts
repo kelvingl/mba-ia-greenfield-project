@@ -48,3 +48,57 @@ export class TokenReuseDetectedException extends DomainException {
     );
   }
 }
+
+export class ChannelNotFoundException extends DomainException {
+  constructor() {
+    super('CHANNEL_NOT_FOUND', 404, 'Channel not found');
+  }
+}
+
+export class VideoNotFoundException extends DomainException {
+  constructor() {
+    super('VIDEO_NOT_FOUND', 404, 'Video not found');
+  }
+}
+
+export class InvalidUploadStateException extends DomainException {
+  constructor() {
+    super(
+      'INVALID_UPLOAD_STATE',
+      409,
+      'Video is not in a state that accepts this upload operation',
+    );
+  }
+}
+
+export class InvalidPartNumberException extends DomainException {
+  constructor() {
+    super(
+      'INVALID_PART_NUMBER',
+      400,
+      'Part number is outside the upload range',
+    );
+  }
+}
+
+export class InvalidUploadPartsException extends DomainException {
+  constructor() {
+    super(
+      'INVALID_UPLOAD_PARTS',
+      400,
+      'The storage rejected the list of uploaded parts',
+    );
+  }
+}
+
+export class VideoNotReadyException extends DomainException {
+  constructor() {
+    super('VIDEO_NOT_READY', 409, 'Video processing has not finished');
+  }
+}
+
+export class InvalidWebhookTokenException extends DomainException {
+  constructor() {
+    super('INVALID_WEBHOOK_TOKEN', 401, 'Invalid storage webhook token');
+  }
+}

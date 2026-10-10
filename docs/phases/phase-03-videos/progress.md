@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 5/15 completed
+**SIs:** 6/15 completed
 
 ### SI-03.1 — Infra: Dependências, Namespaces de Configuração e Validação de Env
 - **Status:** completed
@@ -63,9 +63,17 @@
   - **PENDÊNCIA DE LINT (anterior e fora do escopo):** `eslint` no projeto inteiro dá 190 problemas (150 erros, 40 avisos) em 11 arquivos já existentes (ex.: `auth.service.spec.ts`, `auth.service.integration-spec.ts`, `create-test-data-source.ts`, `env.validation.integration-spec.ts`). O número é idêntico antes e depois deste SI, e os arquivos novos estão limpos. Como a DoD exige `npm run lint` passando, isso precisa de uma decisão antes do fechamento.
 
 ### SI-03.6 — Endpoint POST /videos: Pré-cadastro do Rascunho e Início do Multipart
-- **Status:** pending
-- **Tests:** —
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 26 novos passing: 14 unit do serviço + 3 do utilitário de erros do Postgres, 3 de integração (Postgres + MinIO) e 5 e2e (spec `videos-create.plan.md`, 5 cenários, ACs #1–#6). Suíte `src`: 36 suites, 206 testes. E2E: 4 suites, 57 testes. `tsc` com 0.
+- **Observations:**
+  - **Sem transação no `createDraft`:** o plano dizia "numa transação", mas um `INSERT` que viola a unicidade aborta a transação inteira no Postgres, e isso impediria o retry do `public_id`. Uso inserção com retry (até 5 tentativas) + abertura do multipart + compensação (apaga a linha se o storage falhar), padrão descrito em `.claude/rules/nestjs-testing.md`. O risco residual (multipart aberto sem linha, se o `save` final falhar) é limpo pelo expiry de 24 h do MinIO.
+  - **Exceções de domínio em `common/exceptions/domain.exception.ts`**, não em `videos.exceptions.ts`: é onde todas as do projeto vivem. Criei as 6 do catálogo + `ChannelNotFoundException` (`CHANNEL_NOT_FOUND`, 404), que o plano não lista: defensiva, praticamente inalcançável, porque todo usuário nasce com canal.
+  - **`ChannelsService.findByUserId`** adicionado, para não ler `Channel` direto do módulo de vídeos (separação de domínios).
+  - O título derivado do arquivo cai para `Untitled video` quando o nome é vazio (ex.: `.mp4`). A extensão do objeto vem do MIME (`.mp4`, `.mov`, `.webm`, `.mkv`), nunca do nome enviado.
+  - **OpenAPI já anotado no controller** (`ApiTags`, `ApiOperation`, `ApiResponse`, `ApiBearerAuth`): a regra de controller do projeto exige a documentação na mesma mudança. O SI-03.13 faz o restante (DTOs de resposta das outras rotas, export e sincronização).
+  - **`test:e2e` agora roda com `--runInBand`** no `package.json`. Os e2e compartilham o banco e o `CLAUDE.md` do subprojeto já exigia a flag, mas o script não a tinha; com 4 suites em paralelo apareceram falhas por corrida.
+  - **`test/helpers/e2e-app.ts`** (app com a config global do `main.ts` + usuário autenticado confirmado direto no banco) será reutilizado pelos e2e dos SIs 03.7, 03.8, 03.12 e 03.14.
+  - `utilitário isUniqueViolationOnColumn` criado em `common/database/pg-errors.ts`; o `ChannelsService` tem uma cópia privada equivalente, que deixei como está (fora do escopo).
 
 ### SI-03.7 — Endpoints do Plano de Controle do Upload: URLs de Parte, Partes Enviadas e Conclusão
 - **Status:** pending
