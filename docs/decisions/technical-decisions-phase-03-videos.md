@@ -564,6 +564,36 @@ _Subprojects in scope:_
 
 ---
 
+## TD-16: Stale-Upload Sweep Mechanism and Host Process
+
+**Scope:** Backend
+
+**Capability:** Transversal — covers: "Upload de vídeos com suporte a arquivos de até 10GB sem impacto na performance", "Serviço de processamento em segundo plano (filas)"
+
+**Context:** The TD-07 Revision fixes the policy *"periodic sweep marks videos still `uploading` after 24 h as `failed`"*. It does not say how the sweep is triggered or which process runs it, so `plan-validate` raised MD-1. The choice matters for three reasons. It may add a library (`@nestjs/schedule` is not installed; `bullmq`/`@nestjs/bullmq` arrive with TD-02). It decides whether the sweep runs once or once per replica (TD-03 lets workers scale, and the API may scale too). It also decides whether the DB visibly holds the terminal state, which the TD-05 Revision requires for the brief's status cycle. The sweep races the TD-06 B event consumer (an upload finishing near the 24 h mark), so both transitions out of `uploading` must be conditional (`UPDATE … WHERE processing_status = 'uploading'`). That holds for every option below. Incomplete multipart parts are already cleaned by the bucket lifecycle rule (TD-07), so the sweep only owns the DB row. Depends on TD-02, TD-03, TD-05, TD-06, TD-07.
+
+**Options:**
+
+### Option A: BullMQ Job Scheduler on a dedicated maintenance queue, processed by the video worker
+- The worker (TD-03) calls `queue.upsertJobScheduler('stale-upload-sweep', { every: <interval> }, { name: 'sweep-stale-uploads' })` at bootstrap. A `@Processor('maintenance')` in `WorkerModule` runs one conditional bulk `UPDATE` setting `processing_status = failed` and `failure_reason = upload_expired` (TD-15 shape). It uses its own queue, separate from video processing.
+- **Pros:** No new dependency; it reuses TD-02's Redis and `@nestjs/bullmq`. Runs **once per tick regardless of replica count**, because the scheduler is a single Redis entity and `upsert` is idempotent across workers restarting. Keeps background work out of the API process (TD-03's rationale). Gets BullMQ retries and visibility for free. A dedicated queue avoids the documented caveat that a scheduler only produces its next job once the previous one starts processing, so it cannot starve behind multi-minute FFmpeg jobs.
+- **Cons:** The schedule lives in Redis, not in code. Renaming or removing it needs an explicit `removeJobScheduler`, and changing the interval relies on the bootstrap upsert. Integration tests need real Redis (already true for TD-02). A second queue name to configure.
+
+### Option B: `@nestjs/schedule` `@Cron` + `@nestjs/locks` `@OnOneInstance`
+- `ScheduleModule.forRoot()` with an `@Cron(EVERY_HOUR)` method, in the API or the worker, runs the same conditional `UPDATE`. Per the NestJS docs, the scheduler runs every job in every process, so `@OnOneInstance` with a shared lock store (Redis or PostgreSQL) is needed to run it once per tick.
+- **Pros:** Declarative, and the schedule is visible in code. Idiomatic NestJS. Independent of queue state.
+- **Cons:** Adds **two** dependencies (`@nestjs/schedule`, `@nestjs/locks`) plus a lock store configuration, which duplicates the scheduling and coordination BullMQ already provides. Without the lock it silently runs N times with N replicas. Tests must drive the cron tick or call the method directly.
+
+### Option C: No scheduler — lazy expiration at read time
+- Treat `uploading` older than 24 h as failed when read (computed in queries/serialization), optionally persisting `failed` when the row is touched (status poll, `complete`, event consumer).
+- **Pros:** Zero scheduling infrastructure and no extra process work.
+- **Cons:** **The DB does not hold the terminal state** for untouched rows, which conflicts with the TD-05 Revision ("o ciclo deve ser refletido no banco"). Every query that filters by status (Phase 04 panel, listings) must reapply the rule, so it spreads across components and drifts. Also contradicts the TD-07 Revision's "periodic sweep" wording.
+
+**Recommendation:** **Option A (BullMQ Job Scheduler, dedicated `maintenance` queue, processed in the video worker)**. TD-02 already puts BullMQ and Redis in the stack and TD-03 already gives background work its own process. A Job Scheduler gets exactly-once-per-tick execution across replicas with no new library, while Option B needs two extra packages and a lock store to match it. Option C does not meet the TD-05 Revision's requirement that the DB show the terminal state. Suggested parameters, to be fixed at decision time or by `/plan-build`: interval `every: 1 h` (worst case ≈ 25 h before a stale upload is marked), `failure_reason = upload_expired`.
+
+**Decision:** **Option A (BullMQ Job Scheduler, dedicated `maintenance` queue, processed in the video worker)**
+
+---
 
 ## Decisions Summary
 
@@ -584,6 +614,7 @@ _Subprojects in scope:_
 | TD-13 | Backend | Thumbnail generation policy | **B** (seek + `thumbnail` filter window, JPEG 1280px) | **B** |
 | TD-14 | Cross-layer | Processing status propagation | **A** (polling via BFF) | **A** |
 | TD-15 | Backend | Processing failure policy | **A** (3 attempts + backoff, `UnrecoverableError` for permanent errors, `failed` + `failure_reason`) | **A** |
+| TD-16 | Backend | Stale-upload sweep mechanism and host process | **A** (BullMQ Job Scheduler on a `maintenance` queue, processed by the video worker) | **A** |
 
 ---
 
@@ -597,7 +628,7 @@ _Subprojects in scope:_
   - the BFF Route Handlers for the upload control plane;
   - `next/image` `remotePatterns` for the thumbnail host (TD-11);
   - **the E2E strategy for browser→storage traffic.** Today's E2E rule fakes only upstream NestJS via server-side MSW, and direct PUTs to storage are not covered by that mechanism.
-- **Dependencies between TDs:** TD-04 → TD-06, TD-07 (API-mediated multipart; under TD-06 B the size check lives in the event consumer — see TD-06/TD-07 Revisions). TD-02 + TD-05 → TD-15. TD-10 → TD-09 (if TD-10 = A, TD-09 collapses to A). TD-01 + TD-10 → TD-11. TD-02 → TD-03 (processor shape). TD-05 → TD-14 (polling stop condition).
+- **Dependencies between TDs:** TD-04 → TD-06, TD-07 (API-mediated multipart; under TD-06 B the size check lives in the event consumer — see TD-06/TD-07 Revisions). TD-02 + TD-05 → TD-15. TD-10 → TD-09 (if TD-10 = A, TD-09 collapses to A). TD-01 + TD-10 → TD-11. TD-02 → TD-03 (processor shape). TD-05 → TD-14 (polling stop condition). TD-02 + TD-03 + TD-07 → TD-16 (sweep mechanism; transition out of `uploading` must be conditional because it races the TD-06 B consumer).
 - **Testing guide revision required.** `.claude/skills/testing-guide-nestjs-project/references/external-systems.md` § "Object Storage — Local Filesystem" contradicts TD-01 A/B/C + TD-04 A. If those are accepted, `/plan-build` must include a task to rewrite that section ("real S3-compatible server in Docker, bucket cleaned between tests") and to concretize the queue section with the TD-02 choice. Integration tests then hit the real storage and Redis containers, consistent with the existing real-DB + Mailpit approach.
 - **New env keys (cross-component contract).** Storage (`S3_ENDPOINT`, `S3_PUBLIC_ENDPOINT`, `S3_REGION`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, bucket name(s)) queue (`REDIS_HOST`, `REDIS_PORT`) and storage-event webhook (a shared token, e.g. `STORAGE_WEBHOOK_TOKEN`, per TD-06 Revision) keys go into `env.validation.ts` (Joi), new `registerAs` namespaces, `compose.yaml` and `.env.example`. Exact names are an implementation detail; the internal-vs-public endpoint split is part of TD-11. Per root `CLAUDE.md`, internal hosts use Compose service names; only `S3_PUBLIC_ENDPOINT` is a host-reachable URL (published port), because the browser consumes it.
 - **Compose topology.** `nestjs-project/compose.yaml` gains the storage service (+ init step for bucket, CORS, lifecycle, the public-read thumbnail prefix policy and the `notify_webhook` target pointing at the API by service name — TD-06 Revision), `redis` (TD-02 A) and `video-worker` (TD-03 A). The `next-frontend` stack stays separate; the browser reaches storage through the published host port.
