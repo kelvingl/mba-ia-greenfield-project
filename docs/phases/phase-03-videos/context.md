@@ -3,7 +3,7 @@ kind: phase
 name: phase-03-videos
 sources_mtime:
   docs/project-plan.md: "2026-10-07T22:40:21-03:00"
-  docs/decisions/technical-decisions-phase-03-videos.md: "2026-10-10T13:57:52-03:00"
+  docs/decisions/technical-decisions-phase-03-videos.md: "2026-10-10T14:07:05-03:00"
   docs/phases/phase-03-videos/library-refs.md: "2026-10-10T13:49:26-03:00"
   docs/decisions/technical-decisions-openapi-docs-nestjs.md: "2026-10-07T22:40:21-03:00"
   docs/decisions/technical-decisions-next-frontend-config-base.md: "2026-10-07T22:40:21-03:00"

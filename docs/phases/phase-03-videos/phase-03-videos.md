@@ -217,7 +217,7 @@ This meets the deliverables "upload de até 10GB funcional, processamento autom�
 ### SI-03.6 — Endpoint POST /videos: Pré-cadastro do Rascunho e Início do Multipart
 
 **Route:** POST /videos
-**Test Specs:** _pending /plan-test-specs_
+**Test Specs:** see `nestjs-project/specs/videos-create.plan.md`
 **Authorization:** Authenticated (vídeo criado no canal do chamador)
 
 **Description:** Ao iniciar o upload, cria o vídeo como rascunho (`uploading`, `published_at` nulo) no canal do usuário e abre o multipart no storage. O cliente recebe o tamanho de parte ditado pelo servidor; nenhum byte do arquivo passa pela API.
@@ -258,7 +258,7 @@ This meets the deliverables "upload de até 10GB funcional, processamento autom�
 ### SI-03.7 — Endpoints do Plano de Controle do Upload: URLs de Parte, Partes Enviadas e Conclusão
 
 **Route:** POST /videos/:publicId/upload/part-urls; GET /videos/:publicId/upload/parts; POST /videos/:publicId/upload/complete
-**Test Specs:** _pending /plan-test-specs_
+**Test Specs:** see `nestjs-project/specs/videos-upload.plan.md`
 **Authorization:** Owner (canal do vídeo = canal do chamador; não-dono recebe `404 VIDEO_NOT_FOUND`)
 
 **Description:** Permite que o cliente envie até 10GB direto ao storage em partes presigned, retome pela listagem de partes e finalize o multipart. A API só assina e coordena; a conclusão não enfileira o processamento.
@@ -296,7 +296,7 @@ This meets the deliverables "upload de até 10GB funcional, processamento autom�
 ### SI-03.8 — Webhook de Eventos do Storage, Verificação de Tamanho e Enfileiramento
 
 **Route:** POST /internal/storage-events
-**Test Specs:** _pending /plan-test-specs_
+**Test Specs:** see `nestjs-project/specs/internal-storage-events.plan.md`
 **Authorization:** Storage webhook token (only) — `@Public()` fora do guard JWT global
 
 **Description:** Dispara o processamento a partir do fato registrado pelo storage (o objeto passou a existir), não de um relato do cliente. Verifica o tamanho real e move o vídeo de `uploading` para `processing`, enfileirando o job uma única vez.
@@ -451,7 +451,7 @@ This meets the deliverables "upload de até 10GB funcional, processamento autom�
 ### SI-03.12 — Endpoints de Status, Playback (Streaming) e Download
 
 **Route:** GET /videos/:publicId; GET /videos/:publicId/playback-url; GET /videos/:publicId/download-url
-**Test Specs:** _pending /plan-test-specs_
+**Test Specs:** see `nestjs-project/specs/videos-delivery.plan.md`
 **Authorization:** Owner (não-dono recebe `404 VIDEO_NOT_FOUND`)
 
 **Description:** Expõe ao dono o status do processamento (para polling) e emite URLs presigned de curta duração. A de playback permite streaming por Range, sem baixar o arquivo inteiro; a de download serve o arquivo original.
