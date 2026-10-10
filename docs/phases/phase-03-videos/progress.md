@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 8/15 completed
+**SIs:** 9/15 completed
 
 ### SI-03.1 — Infra: Dependências, Namespaces de Configuração e Validação de Env
 - **Status:** completed
@@ -101,9 +101,15 @@
   - A decisão sobre a não idempotência de `complete` (SI-03.7) segue em aberto: não foi alterada aqui.
 
 ### SI-03.9 — FfmpegService: Probe, Thumbnail e Normalização para Playback
-- **Status:** pending
-- **Tests:** —
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 15 passing (6 unit de `needsTranscode`, 9 integração com FFmpeg real + MinIO); `tsc` exit 0; arquivos novos sem erros de lint
+- **Observations:**
+  - `probe` classifica como `PermanentMediaError` só o que é mídia ilegível (`Invalid data found`, `moov atom not found`, `could not find codec parameters`) ou ausência de stream de vídeo. Qualquer outro erro do ffprobe (arquivo/URL inacessível) sobe como `Error` comum, para o processor poder tentar de novo. Isso é um heurístico sobre a mensagem do ffprobe, coberto por testes de bytes aleatórios e de caminho inexistente.
+  - O thumbnail usa offset de 10% da duração, limitado a `duração - 1 s` para vídeos curtos (o TD-13 diz "~10%, clamped"); a saída é forçada com `.format('image2')` porque a extensão `.jpg` sozinha já basta, mas assim não depende dela.
+  - O thumbnail é sempre escalado para 1280 px de largura, inclusive quando a origem é menor (fixture de 640x360 vira 1280x720), como o critério de aceite pede.
+  - `normalizeForPlayback` faz remux (`-c copy`) quando `needsTranscode` é falso e, senão, `libx264 -pix_fmt yuv420p` + `aac`; ambos com `+faststart`, sempre em arquivo.
+  - Fixtures geradas sob demanda por `src/test/media.ts` (lavfi); inclui `topLevelBoxes` (ordem `moov`/`mdat`) e `jpegSize`, que evitam depender de `ffprobe` para verificar a própria saída.
+  - O probe via URL presigned interna foi exercitado com um objeto real no MinIO.
 
 ### SI-03.10 — VideoProcessor: Pipeline de Processamento e Política de Falha
 - **Status:** pending
