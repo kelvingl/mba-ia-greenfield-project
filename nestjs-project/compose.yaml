@@ -54,6 +54,13 @@ services:
       # Equivalent of the AbortIncompleteMultipartUpload lifecycle rule, which
       # MinIO does not accept: abandoned multipart uploads expire after 24h.
       - MINIO_API_STALE_UPLOADS_EXPIRY=24h
+      # Bucket notification target: the API consumes it to start processing
+      # (TD-06 B). Persistent queue dir so events survive an API outage.
+      - MINIO_NOTIFY_WEBHOOK_ENABLE_PRIMARY=on
+      - MINIO_NOTIFY_WEBHOOK_ENDPOINT_PRIMARY=http://nestjs-api:3000/internal/storage-events
+      - MINIO_NOTIFY_WEBHOOK_AUTH_TOKEN_PRIMARY=${STORAGE_WEBHOOK_TOKEN}
+      - MINIO_NOTIFY_WEBHOOK_QUEUE_DIR_PRIMARY=/data/.events
+      - MINIO_NOTIFY_WEBHOOK_QUEUE_LIMIT_PRIMARY=100000
     volumes:
       - minio-data:/data
 

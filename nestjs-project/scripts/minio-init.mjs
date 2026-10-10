@@ -7,6 +7,7 @@
 import {
   CreateBucketCommand,
   HeadBucketCommand,
+  PutBucketNotificationConfigurationCommand,
   PutBucketPolicyCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
@@ -58,3 +59,23 @@ await client.send(
   }),
 );
 console.log(`public-read policy applied to ${S3_BUCKET}/thumbnails/`);
+
+// Tell the bucket to notify the webhook target (see `minio` service env) when a
+// multipart upload of an original completes (TD-06 B).
+await client.send(
+  new PutBucketNotificationConfigurationCommand({
+    Bucket: S3_BUCKET,
+    NotificationConfiguration: {
+      QueueConfigurations: [
+        {
+          QueueArn: 'arn:minio:sqs::PRIMARY:webhook',
+          Events: ['s3:ObjectCreated:CompleteMultipartUpload'],
+          Filter: {
+            Key: { FilterRules: [{ Name: 'prefix', Value: 'originals/' }] },
+          },
+        },
+      ],
+    },
+  }),
+);
+console.log(`notifications enabled for ${S3_BUCKET}/originals/`);

@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 7/15 completed
+**SIs:** 8/15 completed
 
 ### SI-03.1 — Infra: Dependências, Namespaces de Configuração e Validação de Env
 - **Status:** completed
@@ -88,9 +88,17 @@
   - Só `InvalidPart` foi exercitado contra o MinIO real; os outros nomes de erro mapeados (`InvalidPartOrder`, `EntityTooSmall`, `NoSuchUpload`) estão cobertos só no nível unitário.
 
 ### SI-03.8 — Webhook de Eventos do Storage, Verificação de Tamanho e Enfileiramento
-- **Status:** pending
-- **Tests:** —
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 25 unit/integração (parser, guard, `StorageEventsService`) + 5 e2e (`test/internal-storage-events.e2e-spec.ts`); suíte `src` e e2e completas verdes (69 e2e), `tsc` exit 0
+- **Observations:**
+  - O corpo do webhook é tipado `unknown` e validado à mão em `parseObjectCreatedRecords`: um DTO seria rejeitado pelo `forbidNonWhitelisted` global, já que a notificação S3 traz muitos campos que não são nossos.
+  - O token é comparado em tempo constante (SHA-256 dos dois lados + `timingSafeEqual`), o que dispensa tratar tamanhos diferentes.
+  - Verificado empiricamente contra o MinIO real: ele monta o header `Authorization` sozinho a partir de `AUTH_TOKEN` (chega `Bearer <token>`), então o compose passa só o token cru, sem prefixo.
+  - A chave no evento do MinIO vem como `bucket/originals/...` no campo de topo; o consumidor usa `Records[].s3.object.key` (sem bucket, URL-encoded).
+  - `compose.yaml`: `MINIO_NOTIFY_WEBHOOK_*_PRIMARY` com `QUEUE_DIR` em `/data/.events` (eventos sobrevivem a uma queda da API). `minio-init.mjs` registra a notificação (`CompleteMultipartUpload`, prefixo `originals/`) via `PutBucketNotificationConfiguration`.
+  - Evento para vídeo já em `processing` reenfileira (o `jobId = videoId` torna isso no-op se o job existe), cobrindo a janela entre o UPDATE e o `queue.add`.
+  - `VideosModule` agora importa `QueueModule`; `videos.module.spec.ts` e `videos.service.integration-spec.ts` ganharam `queueConfig` no `ConfigModule`.
+  - A decisão sobre a não idempotência de `complete` (SI-03.7) segue em aberto: não foi alterada aqui.
 
 ### SI-03.9 — FfmpegService: Probe, Thumbnail e Normalização para Playback
 - **Status:** pending

@@ -11,6 +11,7 @@ import {
   InvalidUploadStateException,
   VideoNotFoundException,
 } from '../common/exceptions/domain.exception';
+import queueConfig from '../config/queue.config';
 import storageConfig from '../config/storage.config';
 import { StorageService } from '../storage/storage.service';
 import {
@@ -57,7 +58,7 @@ describe('VideosService (integration, real Postgres + MinIO)', () => {
     process.env.S3_PUBLIC_ENDPOINT = process.env.S3_ENDPOINT;
     module = await Test.createTestingModule({
       imports: [
-        ConfigModule.forRoot({ isGlobal: true, load: [storageConfig] }),
+        ConfigModule.forRoot({ isGlobal: true, load: [storageConfig, queueConfig] }),
         TypeOrmModule.forRoot(
           createTestDataSource(
             [User, Channel, Video, RefreshToken, VerificationToken],
