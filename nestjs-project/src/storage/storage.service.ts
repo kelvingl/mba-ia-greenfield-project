@@ -1,5 +1,7 @@
-import { createReadStream } from 'node:fs';
+import { createReadStream, createWriteStream } from 'node:fs';
 import { stat } from 'node:fs/promises';
+import type { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import {
   CompleteMultipartUploadCommand,
   CreateMultipartUploadCommand,
@@ -177,6 +179,14 @@ export class StorageService {
         ContentType: contentType,
       }),
     );
+  }
+
+  /** Streams an object to a local file without holding it in memory. */
+  async downloadObjectToFile(key: string, filePath: string): Promise<void> {
+    const { Body } = await this.internalClient.send(
+      new GetObjectCommand({ Bucket: this.config.bucket, Key: key }),
+    );
+    await pipeline(Body as Readable, createWriteStream(filePath));
   }
 
   /** Short-lived GET URL for the browser (streaming/download). */

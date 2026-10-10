@@ -92,6 +92,11 @@ services:
     command: ["npm", "run", "start:worker:dev"]
     volumes:
       - .:/home/node/app
+      # Scratch space for downloaded originals (up to 10 GB each): a disk
+      # volume, never tmpfs, so a large file does not consume RAM.
+      - worker-tmp:/tmp/video-processing
+    environment:
+      - PROCESSING_TMP_DIR=/tmp/video-processing
     depends_on:
       db:
         condition: service_healthy
@@ -112,3 +117,4 @@ services:
 
 volumes:
   minio-data:
+  worker-tmp:

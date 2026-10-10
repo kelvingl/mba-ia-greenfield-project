@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ConfigModule } from '@nestjs/config';
@@ -109,6 +109,23 @@ describe('StorageService (integration, real MinIO)', () => {
     expect(res.status).toBe(206);
     expect(res.headers.get('content-length')).toBe('1024');
     expect(res.headers.get('content-range')).toBe('bytes 0-1023/4096');
+  });
+
+  it('should download an object to a local file', async () => {
+    const key = 'originals/v-dl/source.mp4';
+    const dir = await mkdtemp(join(tmpdir(), 'storage-'));
+    const source = join(dir, 'in.mp4');
+    const target = join(dir, 'out.mp4');
+    await writeFile(source, Buffer.alloc(8192, 3));
+    try {
+      await service.putObjectFromFile(key, source, 'video/mp4');
+
+      await service.downloadObjectToFile(key, target);
+
+      expect(await readFile(target)).toEqual(Buffer.alloc(8192, 3));
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   it('should deliver the original as an attachment when asked', async () => {

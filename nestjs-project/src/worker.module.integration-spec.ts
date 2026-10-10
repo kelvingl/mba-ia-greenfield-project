@@ -1,4 +1,6 @@
 import { Test } from '@nestjs/testing';
+import { VideoProcessor } from './videos/processing/video.processor';
+import { AppModule } from './app.module';
 import { DataSource } from 'typeorm';
 import { WorkerModule } from './worker.module';
 
@@ -20,5 +22,24 @@ describe('WorkerModule (integration)', () => {
     );
 
     await app.close();
+  }, 30000);
+
+  it('should own the video processor, which the API module must not register', async () => {
+    process.env.QUEUE_PREFIX = `test-${Date.now()}-worker-module-owner`;
+
+    const worker = await Test.createTestingModule({
+      imports: [WorkerModule],
+    }).compile();
+    const api = await Test.createTestingModule({
+      imports: [AppModule],
+    }).compile();
+
+    expect(worker.get(VideoProcessor, { strict: false })).toBeInstanceOf(
+      VideoProcessor,
+    );
+    expect(() => api.get(VideoProcessor, { strict: false })).toThrow();
+
+    await worker.close();
+    await api.close();
   }, 30000);
 });

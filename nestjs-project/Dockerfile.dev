@@ -2,6 +2,9 @@ FROM node:25.6.0-slim
 
 RUN apt update && apt install -y procps curl ffmpeg
 
+# Scratch dir of the video worker (a named volume mounted here inherits this owner).
+RUN mkdir -p /tmp/video-processing && chown node:node /tmp/video-processing
+
 WORKDIR /home/node/app
 
 USER node

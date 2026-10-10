@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 9/15 completed
+**SIs:** 10/15 completed
 
 ### SI-03.1 — Infra: Dependências, Namespaces de Configuração e Validação de Env
 - **Status:** completed
@@ -112,9 +112,16 @@
   - O probe via URL presigned interna foi exercitado com um objeto real no MinIO.
 
 ### SI-03.10 — VideoProcessor: Pipeline de Processamento e Política de Falha
-- **Status:** pending
-- **Tests:** —
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 280 passing na suíte `src` (era 241) e 69 e2e; novos: 8 unit do processor, 5 integração com Redis/Postgres/MinIO/FFmpeg reais, 1 de `downloadObjectToFile`, 1 de propriedade do processor no `WorkerModule`; `tsc` exit 0
+- **Observations:**
+  - Adicionei `StorageService.downloadObjectToFile` (stream com `pipeline`, sem carregar o arquivo na memória), que o plano pressupunha mas não listava; coberto no spec de integração do storage.
+  - Novo `VideoProcessingModule` (FfmpegService + VideoProcessor) importado só pelo `WorkerModule`; um teste confirma que o processor existe no worker e não no `AppModule`. Ele registra `Video`, `Channel` e `User` porque a relação `Video → Channel → User` exige os três no DataSource do worker.
+  - `PROCESSING_TMP_DIR` (config `queue`, opcional) define o scratch dir; no compose é o volume nomeado `worker-tmp` em `/tmp/video-processing` (disco, não tmpfs, para um original de 10 GB não ocupar RAM). O diretório é criado na `Dockerfile.dev` com dono `node`, senão o volume nascia `root` e o worker real falharia com `EACCES` (detectado ao conferir o container, não pelos testes, que usam o tmp do sistema).
+  - O hook `failed` decide pelo tipo do erro: `UnrecoverableError` → `not_a_video`; qualquer outro só marca `processing_failed` quando `attemptsMade >= attempts`. Confirmado que o BullMQ já conta a tentativa que falhou em `attemptsMade` nesse ponto (o teste de 3 tentativas depende disso).
+  - O teste de "falha só na última" observa o status por polling durante as tentativas, e a falha transitória é injetada com `jest.spyOn(putObjectFromFile)` no provider real; fila, worker, Redis, FFmpeg e MinIO ficam reais.
+  - **Risco herdado:** `putObjectFromFile` usa um único `PutObject` (limite de 5 GB do S3). Um `playback.mp4` de remux de um original de ~10 GB estouraria. Não tratei aqui (precisaria de upload multipart, `@aws-sdk/lib-storage`); fica como item separado.
+  - Os testes do processor usam o fixture de 2 s; não há teste com arquivo grande.
 
 ### SI-03.11 — Varredura de Uploads Parados (Job Scheduler na Fila maintenance)
 - **Status:** pending
