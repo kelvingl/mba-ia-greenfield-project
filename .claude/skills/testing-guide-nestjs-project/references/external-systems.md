@@ -37,89 +37,150 @@ How each external system is handled in tests. These strategies were confirmed wi
 
 ---
 
-## Object Storage — Local Filesystem
+## Object Storage — MinIO via the S3 API (Real, Docker)
 
-**Strategy:** Local filesystem storage in development and tests. S3 in production.
+**Strategy:** A real S3-compatible server (MinIO) runs in Docker for development and tests; production is AWS S3. Application code talks **only to the S3 API** through `@aws-sdk/client-s3` and `@aws-sdk/s3-request-presigner` (`phase-03-videos/TD-01`). There is no local-filesystem adapter, because a filesystem cannot serve presigned multipart URLs, CORS, lifecycle rules or bucket notifications, and those are what the upload flow depends on. Do **not** mock `S3Client` or `getSignedUrl`: a mocked client never catches a wrong endpoint, missing `forcePathStyle`, a bad signature or a wrong bucket policy.
 
-**Approach:**
-- The storage layer should use an abstraction (e.g., `StorageService` interface) that allows switching between local filesystem and S3
-- In tests, use the local filesystem adapter — no mocking needed
-- Use a temporary directory for test uploads: `os.tmpdir()` or a dedicated `test-uploads/` directory
-- Clean up test files in `afterAll`
+**Compose services (in `nestjs-project/compose.yaml`):**
+- `minio`: the pinned MinIO image. API on port 9000, console on 9001.
+- An init step (e.g. a one-shot `minio/mc` container) that creates the bucket(s) and applies CORS, the lifecycle rule and the public-read thumbnail prefix. Tests rely on this init step having run, exactly as they rely on `db` being healthy.
 
-**Setup pattern:**
+**Endpoints — internal vs public (`phase-03-videos/TD-11`):**
+- Tests run inside the `nestjs-api` container, so the SDK reaches storage at the **Compose service name**: `S3_ENDPOINT=http://minio:9000`. Never use `localhost` (see root `CLAUDE.md` → Docker Networking).
+- Browser-facing presigned URLs are signed against `S3_PUBLIC_ENDPOINT` (a host-reachable URL such as `http://localhost:9000`). That host is **not reachable from inside the container**. SigV4 signs the host, so a URL signed for one host does not work against another. In tests:
+  - Assert public URLs by **shape**: host equals `S3_PUBLIC_ENDPOINT`, `X-Amz-Expires` matches the configured TTL, and `response-content-disposition` is present for downloads.
+  - For a **round trip** (PUT/GET bytes through a presigned URL), sign with the **internal** endpoint and `fetch` it from the test.
+
+**Client config for MinIO:**
 ```typescript
-// In test module setup
-{
-  provide: 'STORAGE_CONFIG',
-  useValue: {
-    driver: 'local',
-    basePath: path.join(os.tmpdir(), 'streamtube-test-uploads'),
+new S3Client({
+  endpoint: process.env.S3_ENDPOINT ?? 'http://minio:9000',
+  region: process.env.S3_REGION ?? 'us-east-1',
+  credentials: {
+    accessKeyId: process.env.S3_ACCESS_KEY_ID ?? 'minioadmin',
+    secretAccessKey: process.env.S3_SECRET_ACCESS_KEY ?? 'minioadmin',
   },
-}
+  forcePathStyle: true, // required for MinIO behind a service name
+  requestChecksumCalculation: 'WHEN_REQUIRED', // see "Checksums" below
+  responseChecksumValidation: 'WHEN_REQUIRED',
+});
 ```
+- **Checksums:** since SDK v3.729 the client sends CRC32 checksums by default. S3-compatible servers may reject them; `DeleteObjects` is the known case. Presigned part URLs can also end up carrying checksum parameters the browser never sends. `WHEN_REQUIRED` restores the pre-3.729 behaviour. Use the **same** setting in the app config and the tests, so the tests exercise the real client config.
 
-**Integration test:**
+**Test isolation:**
+- Use a dedicated test bucket (e.g. `S3_BUCKET=streamtube-test` in the test env), never the dev bucket.
+- Empty it in `beforeEach`. Page through `ListObjectsV2Command` (use `paginateListObjectsV2`), then delete with `DeleteObjectCommand` per key, or with `DeleteObjectsCommand` in batches of ≤1000.
+- Also abort leftover multipart uploads (`ListMultipartUploadsCommand` + `AbortMultipartUploadCommand`). Otherwise a failed multipart test leaks parts into the next one.
+- Put these in a shared helper, `src/test/s3.ts`, mirroring `src/test/mailpit.ts`.
+
+**Integration test — upload + presigned round trip + streaming:**
 ```typescript
-import * as fs from 'fs';
-import * as path from 'path';
-import * as os from 'os';
+import { GetObjectCommand, HeadObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { emptyTestBucket, internalS3Client, TEST_BUCKET } from '../test/s3';
 
 describe('StorageService (integration)', () => {
-  const testDir = path.join(os.tmpdir(), 'streamtube-test-uploads');
-
-  afterAll(() => {
-    fs.rmSync(testDir, { recursive: true, force: true });
+  beforeEach(async () => {
+    await emptyTestBucket();
   });
 
-  it('should upload and retrieve a file', async () => {
-    const buffer = Buffer.from('test content');
-    const key = await storageService.upload(buffer, 'test.txt');
+  it('stores an object and reports its size via HeadObject', async () => {
+    await storageService.putObject('originals/v1/source.mp4', Buffer.alloc(1024));
 
-    const retrieved = await storageService.get(key);
-    expect(retrieved.toString()).toBe('test content');
+    const head = await internalS3Client.send(
+      new HeadObjectCommand({ Bucket: TEST_BUCKET, Key: 'originals/v1/source.mp4' }),
+    );
+    expect(head.ContentLength).toBe(1024);
+  });
+
+  it('serves byte ranges through a presigned GET (streaming contract)', async () => {
+    await internalS3Client.send(
+      new PutObjectCommand({ Bucket: TEST_BUCKET, Key: 'playback/v1.mp4', Body: Buffer.alloc(4096) }),
+    );
+    const url = await getSignedUrl(
+      internalS3Client,
+      new GetObjectCommand({ Bucket: TEST_BUCKET, Key: 'playback/v1.mp4' }),
+      { expiresIn: 60 },
+    );
+
+    const res = await fetch(url, { headers: { Range: 'bytes=0-1023' } });
+    expect(res.status).toBe(206);
+    expect(Number(res.headers.get('content-length'))).toBe(1024);
+  });
+
+  it('signs browser-facing download URLs against the public endpoint', async () => {
+    const url = new URL(await storageService.getDownloadUrl('originals/v1/source.mp4', 'My video.mp4'));
+
+    expect(url.origin).toBe(new URL(process.env.S3_PUBLIC_ENDPOINT!).origin);
+    expect(url.searchParams.get('response-content-disposition')).toContain('attachment');
   });
 });
 ```
+
+**Key points:**
+- Real MinIO catches endpoint, path-style, signature, CORS and bucket-policy bugs that a mock or a filesystem adapter cannot.
+- Multipart flows (`CreateMultipartUpload` → presigned `UploadPart` → `CompleteMultipartUpload` with every part's `ETag`) are integration-tested end to end against MinIO, using small parts. S3's 5 MiB minimum applies to every part except the last, so a 2-part test needs ≥5 MiB in part 1.
+- Bucket notifications (`notify_webhook` → `POST /internal/storage-events`) are exercised in **E2E**, because they need the HTTP app listening. In **integration** tests, call the event-consumer service directly with a recorded event payload.
 
 ---
 
-## Message Queue — Real (Docker)
+## Message Queue — BullMQ on Redis (Real, Docker)
 
-**Strategy:** Real message broker in Docker. The specific technology is TBD per the architecture diagram (likely BullMQ with Redis or RabbitMQ).
+**Strategy:** A real Redis runs in Docker, with BullMQ through `@nestjs/bullmq` (`phase-03-videos/TD-02`). Do **not** mock `Queue` or `Worker`: retries, backoff, `UnrecoverableError`, `jobId` deduplication, stalled-job recovery and job schedulers are Redis-side behaviour. A mock only proves you called a method. The queue is a configured library, so test it like `JwtModule`: real instance, test config.
 
-**When the queue technology is chosen, configure:**
-- A queue broker service in `compose.yaml` (e.g., Redis for BullMQ, RabbitMQ for AMQP)
-- Test isolation: use dedicated test queues or clean queues between tests
-- For publisher tests: assert the job is enqueued with correct data
-- For consumer tests: submit a job and assert the processing outcome
+**Compose service:** `redis` (e.g. `redis:7-alpine`, port 6379). Tests connect with `REDIS_HOST=redis` (the Compose service name, never `localhost`).
 
-**Setup pattern (BullMQ example):**
+**Test isolation:**
+- Give each integration spec file its own BullMQ **`prefix`** (e.g. `test-${path.basename(__filename)}`). Keys then never collide with the dev worker or other spec files, and leftovers are easy to spot.
+- In `beforeEach`, call `await queue.obliterate({ force: true })`. It removes waiting, delayed, completed and failed jobs **and job schedulers** for that queue. Use `queue.drain(true)` only when you need to keep schedulers.
+- Keep integration specs serial (`npm run test:integration` already uses `--runInBand`).
+
+**Teardown (prevents Jest hangs; see `gotchas.md` #3):** close everything that holds a Redis connection, in this order: workers, `QueueEvents`, queues, then the Nest module/app:
 ```typescript
-// In test module
-BullModule.forRoot({
-  connection: {
-    host: process.env.REDIS_HOST ?? 'localhost',
-    port: Number(process.env.REDIS_PORT ?? 6379),
-  },
-}),
-BullModule.registerQueue({ name: 'video-processing' }),
-```
-
-```typescript
-describe('VideoService (integration - queue)', () => {
-  it('should enqueue a processing job on upload', async () => {
-    await videoService.upload(videoData);
-
-    const queue = module.get<Queue>(getQueueToken('video-processing'));
-    const jobs = await queue.getJobs(['waiting']);
-    expect(jobs).toHaveLength(1);
-    expect(jobs[0].data).toEqual(
-      expect.objectContaining({ videoId: expect.any(String) }),
-    );
-  });
+afterAll(async () => {
+  await queueEvents.close();
+  await module.close(); // closes @nestjs/bullmq queues and @Processor workers
 });
 ```
+
+**Setup pattern — test module:**
+```typescript
+const prefix = `test-${path.basename(__filename)}`;
+
+const module = await Test.createTestingModule({
+  imports: [
+    ConfigModule.forRoot({ isGlobal: true, load: [queueConfig /* + others */] }),
+    BullModule.forRoot({
+      connection: {
+        host: process.env.REDIS_HOST ?? 'redis',
+        port: Number(process.env.REDIS_PORT ?? 6379),
+      },
+      prefix,
+    }),
+    BullModule.registerQueue({ name: 'video-processing' }),
+  ],
+  providers: [VideoProcessor /* + real or test deps */],
+}).compile();
+await module.init(); // starts @Processor workers (onApplicationBootstrap)
+
+const queue = module.get<Queue>(getQueueToken('video-processing'));
+const queueEvents = new QueueEvents('video-processing', { connection: { host: process.env.REDIS_HOST ?? 'redis' }, prefix });
+await queueEvents.waitUntilReady();
+```
+
+**Producer test — job enqueued with correct data, deduplicated by `jobId`.** The test module registers the queue but **no `@Processor`**, so jobs stay in `waiting` and can be inspected:
+```typescript
+it('enqueues one processing job per video, even when the event is delivered twice', async () => {
+  await storageEventsService.handleObjectCreated(eventFor('v1'));
+  await storageEventsService.handleObjectCreated(eventFor('v1')); // duplicate notification
+
+  const job = await queue.getJob('v1'); // jobId = videoId
+  expect(job?.data).toEqual(expect.objectContaining({ videoId: 'v1' }));
+  expect(await queue.getWaitingCount()).toBe(1);
+});
+```
+
+For processor tests (retries, `UnrecoverableError`, the `failed` hook) and job-scheduler tests, see **`../artifacts/processors.md`**.
 
 ---
 
