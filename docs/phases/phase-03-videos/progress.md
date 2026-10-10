@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 3/15 completed
+**SIs:** 4/15 completed
 
 ### SI-03.1 — Infra: Dependências, Namespaces de Configuração e Validação de Env
 - **Status:** completed
@@ -38,9 +38,17 @@
   - Erro tipado `InvalidUploadPartsError` mapeia `InvalidPart`, `InvalidPartOrder`, `EntityTooSmall` e `NoSuchUpload`. Só `InvalidPart` foi exercitado contra o MinIO (ETag adulterado).
 
 ### SI-03.4 — Módulo de Fila e Entrypoint do Video Worker
-- **Status:** pending
-- **Tests:** —
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 4 novos passing (1 unit, 3 integração com Redis/Postgres reais). Suíte `src` sem o spec de migrations: 29 suites, 175 testes. E2E: 3 suites, 52 testes.
+- **Observations:**
+  - **`ioredis` instalado:** o BullMQ 6 não traz o cliente Redis (peer opcional) e não conecta sem ele. É requisito técnico da TD-02, mas não consta no campo `Libraries` nem no `library-refs.md`. Sugestão: revisão na TD-02 e atualização do `library-refs.md`.
+  - **Jest e `@nestjs/bullmq` 12 (ESM-only):** o Jest em CommonJS não carregava `@nestjs/bullmq` nem `@nestjs/bull-shared` (`SyntaxError: Unexpected token 'export'`). Mantive as versões fixadas e configurei o `transform` do Jest para transpilar só esses dois pacotes, em `package.json` e em `test/jest-e2e.json`. Rebaixar para a linha 11 (CJS) seria a alternativa.
+  - **Nomes de teste:** `QueueModule` e `WorkerModule` abrem conexão (Redis/Postgres), então usei `*.integration-spec.ts`, como manda o `CLAUDE.md` do subprojeto, em vez de `*.module.spec.ts` do plano.
+  - **`QUEUE_PREFIX` antecipado:** adicionei o prefixo do BullMQ (`queueConfig.prefix`, chave opcional no Joi, default `bull`) já neste SI, porque sem ele qualquer teste que enfileire jobs na fila padrão seria consumido pelo worker que roda no container. A ação 1 do SI-03.14 fica atendida.
+  - **Worker em dev sem watch:** `start:worker:dev` usa `ts-node` (reinício manual do container). Dois `nest start --watch` no mesmo bind mount disputariam a pasta `dist/` (`deleteOutDir`). Em produção: `npm run build` + `npm run start:worker` (verificado: `dist/worker.js` sobe e loga o início).
+  - **`QueueModule` agora faz parte do `AppModule`:** a API passa a depender do Redis no boot, o que o Compose já garante (`redis` healthy).
+  - **PENDÊNCIA anterior a este SI (precisa de correção antes do DoD):** `src/database/migrations.integration-spec.ts` não é idempotente. Passa na primeira execução com banco limpo e falha em qualquer reexecução (`type "verification_tokens_type_enum" already exists`), porque derruba as tabelas mas não o tipo enum. Quando o `beforeAll` falha, o `afterAll` quebra e o `DataSource` nunca é destruído, e por isso o Jest fica pendurado. Reproduzido duas vezes seguidas, sem relação com este SI.
+  - **PENDÊNCIA de lint (anterior):** 2 erros em `env.validation.integration-spec.ts` (já registrados no SI-03.1).
 
 ### SI-03.5 — Entidade Video, Migration CreateVideos e Gerador de public_id
 - **Status:** pending

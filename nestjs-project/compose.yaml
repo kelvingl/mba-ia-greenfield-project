@@ -76,6 +76,23 @@ services:
         condition: service_started
     restart: "no"
 
+  # Second entrypoint of the same codebase (src/worker.ts): consumes the queues,
+  # no HTTP server, so FFmpeg never competes with the API for CPU (TD-03).
+  video-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    command: ["npm", "run", "start:worker:dev"]
+    volumes:
+      - .:/home/node/app
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+
   redis:
     image: redis:7.4-alpine
     ports:

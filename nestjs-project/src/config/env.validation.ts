@@ -30,6 +30,7 @@ export const envValidationSchema = Joi.object({
   STORAGE_WEBHOOK_TOKEN: Joi.string().required(),
   REDIS_HOST: Joi.string().required(),
   REDIS_PORT: Joi.number().port().required(),
+  QUEUE_PREFIX: Joi.string().default('bull'),
   VIDEO_PROCESSING_BACKOFF_MS: Joi.number().integer().positive().default(5000),
   SWAGGER_ENABLED: Joi.string().valid('true', 'false').default('false'),
 });
