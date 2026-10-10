@@ -1,7 +1,7 @@
 ---
 scope_type: phase
 related_phases: [3]
-status: pending
+status: decided
 date: 2026-10-09
 scope_description: "Backend + cross-layer side of Phase 03 — object storage, background job queue and worker topology, the 10GB resumable upload protocol, video lifecycle modeling, upload validation/limits, FFmpeg-based metadata extraction and thumbnail generation, streaming delivery format, media delivery/URL signing (streaming + download), and the unique public video ID. Frontend-only concerns (upload client library, resume UX, progress UI, E2E for browser→storage traffic) are deferred to a separate frontend research doc for Phase 03."
 ---
@@ -62,7 +62,7 @@ _Subprojects in scope:_
 
 **Recommendation:** **Option A (MinIO, pinned)**, used strictly as a dev/test emulator, with the code bound only to the S3 API through the AWS SDK v3. Replacing the server later (with B, if MinIO's frozen state becomes a problem) is then a `compose.yaml` change, not a code change. MinIO gives the fastest path to a working presigned-multipart + CORS + lifecycle setup, and those are exactly the behaviors TD-04/07/11 depend on. Its abandonment is a real cost, but it is bounded because production is S3. Option B is the honest maintained alternative and becomes the recommendation if the team does not accept a frozen dev dependency. Option D is rejected because it cannot support direct-to-storage transfer. Choosing A, B or C requires revising the testing guide's storage section (see Notes).
 
-**Decision:** _[pending]_
+**Decision:** : **Option A (MinIO, pinned)**
 
 ---
 
@@ -93,7 +93,7 @@ _Subprojects in scope:_
 
 **Recommendation:** **Option A (BullMQ + Redis)**. The workload is job-shaped: long-running, retryable, with progress and per-job state the API may read back (TD-14). BullMQ models that natively, and `@nestjs/bullmq` gives the worker (TD-03) a first-party processor abstraction. Redis is a small, well-understood addition, and the testing guide already assumes it. Option B is a legitimate choice if the team prefers zero new infrastructure: its transactional enqueue is a real advantage, paid for with a hand-written integration. Option C buys routing flexibility the project does not need.
 
-**Decision:** _[pending]_
+**Decision:** **Option A (BullMQ + Redis)**
 
 ---
 
@@ -124,7 +124,7 @@ _Subprojects in scope:_
 
 **Recommendation:** **Option A (separate container, same codebase, second entrypoint)**. It implements the C4 boundary and the performance requirement (processing is isolated from the API) while keeping a single owner of the `Video` entity and config, which matches the project's Single Responsibility principle without creating a second subproject. The FFmpeg-in-API-image cost is cosmetic in dev and can be removed later with a multi-stage build target.
 
-**Decision:** _[pending]_
+**Decision:** **Option A (separate container, same codebase, second entrypoint)**
 
 ---
 
@@ -159,7 +159,7 @@ _Subprojects in scope:_
 
 **Recommendation:** **Option A (S3 multipart with presigned parts, API-mediated control plane)**. It is the only option where 10GB of bytes touch neither Next nor Nest without introducing a new public service, which satisfies both the performance capability and the strict BFF. Resume falls out of S3's own list-parts semantics. Keeping Create/Complete on the server is deliberate: the API learns about completion synchronously, which is the trigger for processing (TD-06) and the point where size validation happens (TD-07). The frontend doc must pick a client configuration that respects this; Uppy 6's `signRequest` mode moves Create/Complete to the client, so it either needs a server-mediated wrapper or a custom uploader.
 
-**Decision:** _[pending]_
+**Decision:** **Option A (S3 multipart with presigned parts, API-mediated control plane)**
 
 ---
 
@@ -189,7 +189,7 @@ _Subprojects in scope:_
 
 **Recommendation:** **Option B (two orthogonal fields)**. The processing pipeline and the publication workflow are owned by different phases and change for different reasons. Separating them follows the project's Single Responsibility principle at the data-model level and spares Phase 04 from migrating an enum this phase created. The pre-registration capability is met by the publication field's draft default.
 
-**Decision:** _[pending]_
+**Decision:** **Option B (two orthogonal fields)**
 
 ---
 
@@ -220,7 +220,7 @@ _Subprojects in scope:_
 
 **Recommendation:** **Option A (client-driven completion call)**. Under TD-04 A the client must call complete anyway to finalize the multipart upload, so making that call also the processing trigger adds no new signal and is identical across storage servers. Idempotent enqueue (`jobId = videoId`) makes retried `complete` calls safe. Abandoned uploads are TD-07's job.
 
-**Decision:** _[pending]_
+**Decision:** **Option B: Storage event notifications**
 
 ---
 
@@ -254,7 +254,7 @@ _Subprojects in scope:_
 
 **Recommendation:** **Option A (declare-and-verify + server-dictated part size + ffprobe authority + lifecycle cleanup)**. It is the only option that enforces the 10GB capability on the server with direct uploads. It also makes the part size a server-owned contract value returned by the init endpoint, so the frontend doc does not need to re-decide it. The concrete values (part size, URL TTL, allowlist, lifecycle days) are parameters for `/plan-build`; the policy shape is what this TD fixes.
 
-**Decision:** _[pending]_
+**Decision:** **Option A: Declare-and-verify, server-dictated part size, worker as final authority, storage-side cleanup**
 
 ---
 
@@ -285,7 +285,7 @@ _Subprojects in scope:_
 
 **Recommendation:** **Option A (system FFmpeg in the image + typed `spawn` wrapper)**. The project already runs everything in containers, so the image is the natural place to pin FFmpeg. `ffprobe -print_format json` is a better contract than any wrapper's object model, and B is ruled out by deprecation.
 
-**Decision:** _[pending]_
+**Decision:** **Option B: `fluent-ffmpeg`**
 
 ---
 
@@ -316,7 +316,7 @@ _Subprojects in scope:_
 
 **Recommendation:** **Option C (hybrid)**. Metadata extraction and thumbnail generation are needed for every video and touch only a few MB over HTTP range reads. Only the TD-10 normalization path needs the full file, and local disk is the more reliable input for a multi-minute job. If TD-10 picks Option A (no rewrite), this collapses to Option A.
 
-**Decision:** _[pending]_
+**Decision:** **Option C: Hybrid — probe and thumbnail via URL; download only when TD-10 requires a full rewrite**
 
 ---
 
@@ -347,7 +347,7 @@ _Subprojects in scope:_
 
 **Recommendation:** **Option B (normalize to a single faststart H.264/AAC MP4)**. It satisfies streaming playback for every upload with a plain `<video>` element and a single object per video, which keeps TD-11's presigned delivery simple. Its cost is low in the common case (remux). Option A rejects too many real uploads; Option C is the right future upgrade (it can be layered on later from the kept original) but is disproportionate now.
 
-**Decision:** _[pending]_
+**Decision:** **Option B (normalize to a single faststart H.264/AAC MP4)**
 
 ---
 
@@ -383,7 +383,7 @@ _Subprojects in scope:_
 
 **Recommendation:** **Option D (hybrid)**. Protecting video bytes for drafts and unlisted videos is a hard requirement of Phases 04–05, and thumbnail cacheability is a hard performance need for every listing page; D is the only option that gets both without routing bytes through the API. The `S3_ENDPOINT`/`S3_PUBLIC_ENDPOINT` split (or equivalent names) is part of this decision because it is the cross-component contract that makes presigned URLs work from the browser in Docker.
 
-**Decision:** _[pending]_
+**Decision:** **Option D: Hybrid — private videos via short-lived presigned URLs; thumbnails under a public-read prefix**
 
 ---
 
@@ -413,7 +413,7 @@ _Subprojects in scope:_
 
 **Recommendation:** **Option A (random 11-char base64url `public_id` with UNIQUE constraint)**. It meets "curta e única" with the database as the uniqueness authority, keeps IDs unguessable for Phase 05's unlisted links, and needs no dependency. The alphabet/length is the contract the FE route validates.
 
-**Decision:** _[pending]_
+**Decision:** **Option A: Random 11-char base64url ID in a `public_id` column (UNIQUE), retry on collision**
 
 ---
 
@@ -443,7 +443,7 @@ _Subprojects in scope:_
 
 **Recommendation:** **Option B (seek + `thumbnail` filter over a short window)**. It fixes the most visible quality failure of A for a few seconds of decoding per video and stays independent of file size. Output as JPEG at 1280px width (`scale=1280:-2`); the exact quality setting is an implementation parameter.
 
-**Decision:** _[pending]_
+**Decision:** **Option B: Seek to an offset, then let FFmpeg's `thumbnail` filter pick the most representative frame from a short window**
 
 ---
 
@@ -473,7 +473,7 @@ _Subprojects in scope:_
 
 **Recommendation:** **Option A (polling via BFF)**. It fits the strict BFF and the existing test scaffold without new infrastructure, and the latency of polling is irrelevant for a process measured in minutes. If a later phase needs real-time push (e.g., live comment counters), B can be introduced then with its own TD.
 
-**Decision:** _[pending]_
+**Decision:** **Option A (polling via BFF)**
 
 ---
 
@@ -481,20 +481,20 @@ _Subprojects in scope:_
 
 | ID | Scope | Decision | Recommendation | Choice |
 |----|-------|----------|----------------|--------|
-| TD-01 | Backend | Object storage server (dev/test) and access SDK | **A** (MinIO pinned, dev-only; AWS SDK v3) | _[pending]_ |
-| TD-02 | Backend | Background job queue technology | **A** (BullMQ + Redis via `@nestjs/bullmq`) | _[pending]_ |
-| TD-03 | Backend | Video worker topology | **A** (separate container, same codebase, second entrypoint) | _[pending]_ |
-| TD-04 | Cross-layer | Upload protocol for ≤10GB resumable uploads | **A** (S3 multipart, presigned parts, API-mediated control plane) | _[pending]_ |
-| TD-05 | Cross-layer | Video lifecycle status modeling | **B** (processing status + publication state as separate fields) | _[pending]_ |
-| TD-06 | Backend | Upload completion signal and job trigger | **A** (client-driven `complete` call, idempotent enqueue) | _[pending]_ |
-| TD-07 | Cross-layer | Upload validation and limits policy | **A** (declare-and-verify, server-dictated part size, ffprobe authority, lifecycle cleanup) | _[pending]_ |
-| TD-08 | Backend | FFmpeg integration approach | **A** (system FFmpeg in image + typed `spawn` wrapper) | _[pending]_ |
-| TD-09 | Backend | Worker access to the source file | **C** (hybrid: URL for probe/thumbnail, download for rewrite) | _[pending]_ |
-| TD-10 | Cross-layer | Streaming delivery format | **B** (normalize to faststart H.264/AAC MP4) | _[pending]_ |
-| TD-11 | Cross-layer | Media delivery path and URL signing | **D** (private videos via presigned; public-read thumbnail prefix) | _[pending]_ |
-| TD-12 | Cross-layer | Unique public video ID | **A** (random 11-char base64url `public_id`, UNIQUE) | _[pending]_ |
-| TD-13 | Backend | Thumbnail generation policy | **B** (seek + `thumbnail` filter window, JPEG 1280px) | _[pending]_ |
-| TD-14 | Cross-layer | Processing status propagation | **A** (polling via BFF) | _[pending]_ |
+| TD-01 | Backend | Object storage server (dev/test) and access SDK | **A** (MinIO pinned, dev-only; AWS SDK v3) | **A** |
+| TD-02 | Backend | Background job queue technology | **A** (BullMQ + Redis via `@nestjs/bullmq`) | **A** |
+| TD-03 | Backend | Video worker topology | **A** (separate container, same codebase, second entrypoint) | **A** |
+| TD-04 | Cross-layer | Upload protocol for ≤10GB resumable uploads | **A** (S3 multipart, presigned parts, API-mediated control plane) | **A** |
+| TD-05 | Cross-layer | Video lifecycle status modeling | **B** (processing status + publication state as separate fields) | **B** |
+| TD-06 | Backend | Upload completion signal and job trigger | **A** (client-driven `complete` call, idempotent enqueue) | **B** |
+| TD-07 | Cross-layer | Upload validation and limits policy | **A** (declare-and-verify, server-dictated part size, ffprobe authority, lifecycle cleanup) | **A** |
+| TD-08 | Backend | FFmpeg integration approach | **A** (system FFmpeg in image + typed `spawn` wrapper) | **B** |
+| TD-09 | Backend | Worker access to the source file | **C** (hybrid: URL for probe/thumbnail, download for rewrite) | **C** |
+| TD-10 | Cross-layer | Streaming delivery format | **B** (normalize to faststart H.264/AAC MP4) | **B** |
+| TD-11 | Cross-layer | Media delivery path and URL signing | **D** (private videos via presigned; public-read thumbnail prefix) | **D** |
+| TD-12 | Cross-layer | Unique public video ID | **A** (random 11-char base64url `public_id`, UNIQUE) | **A** |
+| TD-13 | Backend | Thumbnail generation policy | **B** (seek + `thumbnail` filter window, JPEG 1280px) | **B** |
+| TD-14 | Cross-layer | Processing status propagation | **A** (polling via BFF) | **A** |
 
 ---
 
