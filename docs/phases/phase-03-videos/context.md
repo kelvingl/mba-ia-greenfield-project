@@ -3,8 +3,8 @@ kind: phase
 name: phase-03-videos
 sources_mtime:
   docs/project-plan.md: "2026-10-07T22:40:21-03:00"
-  docs/decisions/technical-decisions-phase-03-videos.md: "2026-10-10T13:32:25-03:00"
-  docs/phases/phase-03-videos/library-refs.md: "2026-10-10T13:33:47-03:00"
+  docs/decisions/technical-decisions-phase-03-videos.md: "2026-10-10T13:57:52-03:00"
+  docs/phases/phase-03-videos/library-refs.md: "2026-10-10T13:49:26-03:00"
   docs/decisions/technical-decisions-openapi-docs-nestjs.md: "2026-10-07T22:40:21-03:00"
   docs/decisions/technical-decisions-next-frontend-config-base.md: "2026-10-07T22:40:21-03:00"
   docs/decisions/technical-decisions-next-frontend-msw-foundation.md: "2026-10-07T22:40:21-03:00"
@@ -12,7 +12,7 @@ sources_mtime:
   docs/phases/phase-01-configuracao-base/context.md: "2026-10-07T22:40:21-03:00"
   docs/phases/phase-02-auth/context.md: "2026-10-07T22:40:21-03:00"
   docs/phases/phase-02-auth-frontend/context.md: "2026-10-07T22:40:21-03:00"
-  .claude/skills/testing-guide-nestjs-project/SKILL.md: "2026-10-10T13:39:52-03:00"
+  .claude/skills/testing-guide-nestjs-project/SKILL.md: "2026-10-10T13:49:26-03:00"
 ---
 
 # phase-03-videos — Context
@@ -48,7 +48,7 @@ sources_mtime:
 | Ref | Source | Scope | Topic | Status | Decision | Libraries |
 |-----|--------|-------|-------|--------|----------|-----------|
 | phase-03-videos/TD-01 | phase | Backend | Object Storage Server (dev/test) and Access SDK | decided | A (MinIO, pinned) | @aws-sdk/client-s3, @aws-sdk/s3-request-presigner |
-|     └─ Last revision: 2026-10-10 — `**Libraries:**` field filled with the AWS SDK v3 packages the Recommendation… | | | | | | |
+|     └─ Last revision: 2026-10-10 — Aligned with the challenge brief (`docs/phases/phase-03-videos/enunciado.md`, "Sobre o… | | | | | | |
 | phase-03-videos/TD-02 | phase | Backend | Background Job Queue Technology | decided | A (BullMQ + Redis) | bullmq, @nestjs/bullmq |
 |     └─ Last revision: 2026-10-10 — `**Libraries:**` field filled with `bullmq` and `@nestjs/bullmq`, as the… | | | | | | |
 | phase-03-videos/TD-03 | phase | Backend | Video Worker Topology | decided | A (separate container, same codebase, second entrypoint) | — |
@@ -102,6 +102,14 @@ _Source files:_
 - 2026-10-10 — `**Libraries:**` field filled with the AWS SDK v3 packages the Recommendation already names (S3 client +
   presigner for multipart parts and GET URLs). Rationale: resolves validation IC-3 — the empty field kept these
   dependencies out of library-refs.md and doc lookups. Decision A unchanged.
+- 2026-10-10 — Aligned with the challenge brief (`docs/phases/phase-03-videos/enunciado.md`, "Sobre o object storage").
+  - The storage server is **given, not open**: S3-compatible, with MinIO locally in Docker and S3 in production. Options B/C stay recorded only as a contingency if the pinned MinIO image becomes unusable.
+  - What this TD fixes is **how storage is used**: a **single bucket** (name from env), with keys organized by prefix:
+    - `originals/{videoId}/source{ext}`: the kept upload. Download source; bucket notification scope (TD-06 B).
+    - `playback/{videoId}.mp4`: the streaming source (TD-10 B).
+    - `thumbnails/{videoId}.jpg`: under the public-read prefix (TD-11 D).
+  - Uploads are presigned multipart (TD-04 A).
+  - Rationale: the brief states the decision is "*como* usá-lo (organização de buckets/chaves, upload pré-assinado), não *qual* storage". Decision A unchanged.
 
 ### phase-03-videos/TD-02
 
