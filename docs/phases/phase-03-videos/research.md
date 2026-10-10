@@ -5,8 +5,7 @@
 O usuário rodou `/research fase 3`. A skill gera um documento de decisões técnicas (TDs) com opções, trade-offs e recomendação; o usuário decide depois e o pipeline segue `/plan-context → /plan-validate → /plan-resolve`.
 
 Escolhas do usuário nesta sessão:
-- **Duas fatias, como na Fase 02:** este documento cobre **backend + cross-layer**. A fatia de frontend (UI de upload, lib cliente de upload/retomada, E2E do tráfego browser→storage) é pesquisada depois em um doc separado.
-- **A UI de upload faz parte da Fase 03.** Ela fica para a fatia de frontend, e as TDs cross-layer daqui descrevem o lado FE de cada contrato.
+- **Fase 03 é só backend** (conforme `enunciado.md`: "a interface de vídeo não faz parte do escopo desta fase"). Não há fatia de frontend nesta fase; as TDs cross-layer fixam o contrato da API, e o lado FE é descrito apenas como hand-off para as Fases 04/05.
 
 O que a investigação encontrou e que molda as TDs:
 - **BFF estrito** (`next-frontend-config-base/TD-03`): o browser nunca chama o NestJS. Mandar 10 GB por Route Handler do Next → Nest não é viável. O diagrama C4 já mostra `Frontend → Object Storage` direto, então upload e streaming direto browser↔storage não violam o BFF.
@@ -19,7 +18,7 @@ O que a investigação encontrou e que molda as TDs:
 
 ## Saída
 
-Arquivo: `docs/decisions/technical-decisions-phase-03-upload-processing.md`. Não há colisão de slug.
+Arquivo: `docs/decisions/technical-decisions-phase-03-videos.md` (nome exigido pelo `enunciado.md`). Não há colisão de slug.
 
 Frontmatter: `scope_type: phase`, `related_phases: [3]`, `status: pending`, `date: 2026-10-09`, sem `covers_capabilities` (mesmo padrão do `phase-02-auth.md`). Segue a estrutura de `technical-decisions-phase-02-auth-frontend.md`:
 - bloco "Subprojects in scope";
@@ -29,7 +28,7 @@ Frontmatter: `scope_type: phase`, `related_phases: [3]`, `status: pending`, `dat
 
 Subprojetos:
 - `nestjs-project/`: principal. Recebe VideosModule, storage, fila, worker, compose (redis, storage, worker).
-- `next-frontend/`: **nenhuma TD só de FE aqui.** Fica para a fatia FE (`ad-hoc`, `related_phases: [3]`, como na Fase 02). As TDs cross-layer descrevem o impacto no FE.
+- `next-frontend/`: **nenhuma TD e nenhum trabalho na Fase 03** (fora do escopo pelo enunciado). As TDs cross-layer descrevem o impacto no FE só como hand-off para as Fases 04/05.
 
 ## TDs (opções → recomendação)
 
@@ -49,12 +48,13 @@ Subprojetos:
 | 12 | Cross-layer | ID público único na URL | A ID aleatório base64url de 11 caracteres (`node:crypto`, ~66 bits) em coluna `public_id` UNIQUE com retry · B UUID da PK na URL · C Sqids sobre sequência bigint | **A**: curto, não enumerável e sem dependência nova. A PK uuid continua interna. C é reversível e enumerável. |
 | 13 | Backend | Política de geração de thumbnail | A frame em offset fixo (~10% da duração, `-ss` antes de `-i`) · B seek + filtro `thumbnail` numa janela curta · C vários candidatos (25/50/75%) | **B**: evita frames pretos ou de fade com custo limitado. Saída em JPEG, largura 1280 (formato e tamanho entram como contrato com `next/image`). |
 | 14 | Cross-layer | Propagação do status de processamento ao FE | A polling via BFF enquanto `uploading/processing` · B SSE do Nest repassado pelo Route Handler · C WebSocket | **A**: encaixa no BFF estrito e no padrão de teste com MSW. Processamento leva minutos, então a latência do polling é irrelevante. |
+| 15 | Backend | Política de falha no processamento | A 3 tentativas + backoff, `UnrecoverableError` para erros permanentes, `failed` + `failure_reason` · B falha no primeiro erro · C A + endpoint de reprocessamento | **A**: estados terminais sempre alcançados, tolera falhas transitórias sem gastar retries em entradas inválidas. C é extrapolação. (Adicionada em 2026-10-10 para atender o enunciado: "o que acontece em caso de falha no processamento".) |
 
 Itens descartados por não serem estratégicos (o teste (d)+(a) da skill): nomes de fila/scripts, layout de chaves dentro do bucket, título padrão do rascunho (nome do arquivo), checagem de dono nos endpoints de upload (guards existentes), fixtures de vídeo para teste, healthchecks do compose. A estratégia de teste de storage não vira TD própria: é consequência da TD-01 e fica nas Notes como atualização do guia de testes.
 
 **Notes for downstream pipeline** vai conter:
 - Dependências entre TDs: 04→06/07, 10→09, 01→11.
-- A fatia FE pendente: lib cliente (Uppy 6 vs custom), retomada após reload, UI de progresso, E2E browser→storage, que hoje não é coberto pelo MSW do lado do servidor.
+- Hand-off de FE para as Fases 04/05: lib cliente (Uppy 6 vs custom), retomada após reload, UI de progresso, E2E browser→storage.
 - A revisão do `external-systems.md`.
 - Chaves de env novas (S3_*, REDIS_*), validadas pelo Joi da Fase 01.
 - Rede entre stacks Compose separadas (o browser alcança o storage pela porta publicada no host).
@@ -63,7 +63,7 @@ Fontes: docs do BullMQ, docs do Uppy (aws-s3 e guia de migração), presigner do
 
 ## Execução (após aprovação)
 
-1. Escrever `docs/decisions/technical-decisions-phase-03-upload-processing.md` com o formato completo acima. Cada opção com no máximo ~6 linhas, recomendações justificadas pelo contexto do projeto e todos os `Decision: _[pending]_`.
+1. Escrever `docs/decisions/technical-decisions-phase-03-videos.md` com o formato completo acima. Cada opção com no máximo ~6 linhas, recomendações justificadas pelo contexto do projeto e todos os `Decision: _[pending]_`.
 2. Nenhum código nem outro arquivo é alterado.
 
 ## Verificação
@@ -71,4 +71,12 @@ Fontes: docs do BullMQ, docs do Uppy (aws-s3 e guia de migração), presigner do
 - Toda TD tem `**Scope:**` e uma `**Capability:**` literal da Fase 03 (ou `Transversal — covers: ...`). Checar com grep `^## TD-` e `^\*\*Capability`.
 - Os 9 bullets da Fase 03 aparecem em pelo menos uma TD (checagem informal; o gate formal é do `plan-validate`).
 - Nenhuma TD reabre decisões anteriores (BFF estrito, erro em envelope, Joi/config, guards JWT).
-- Mensagem final ao usuário: próximo passo `/plan-context phase-03-upload-processing` (ou `3`) → `/plan-validate` → `/plan-resolve`, e depois `/research` da fatia FE.
+- Próximo passo: `/plan-context 3` → `/plan-validate` ↔ `/plan-resolve` → `/plan-build`, gerando os artefatos em `docs/phases/phase-03-videos/`.
+
+## Ajustes de 2026-10-10 (alinhamento com `enunciado.md`)
+
+- Renomeados para os nomes exigidos: `docs/decisions/technical-decisions-phase-03-videos.md` e `docs/phases/phase-03-videos/`.
+- FE fora do escopo da Fase 03.
+- TD-06 = B e TD-08 = B mantidas, com justificativa e mitigação registradas em blocos **Revisions**.
+- Revisions em TD-05 (mapeamento do ciclo rascunho → processando → pronto/erro), TD-07 (valores concretos, título, checagem de tamanho no consumidor de eventos), TD-10 (original mantido) e TD-11 (acesso só do dono na Fase 03, Range/206).
+- Nova TD-15 (política de falha), decidida A.

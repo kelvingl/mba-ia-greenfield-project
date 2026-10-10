@@ -3,7 +3,7 @@ scope_type: phase
 related_phases: [3]
 status: decided
 date: 2026-10-09
-scope_description: "Backend + cross-layer side of Phase 03 — object storage, background job queue and worker topology, the 10GB resumable upload protocol, video lifecycle modeling, upload validation/limits, FFmpeg-based metadata extraction and thumbnail generation, streaming delivery format, media delivery/URL signing (streaming + download), and the unique public video ID. Frontend-only concerns (upload client library, resume UX, progress UI, E2E for browser→storage traffic) are deferred to a separate frontend research doc for Phase 03."
+scope_description: "Backend + cross-layer side of Phase 03 — object storage, background job queue and worker topology, the 10GB resumable upload protocol, video lifecycle modeling, upload validation/limits, FFmpeg-based metadata extraction and thumbnail generation, streaming delivery format, media delivery/URL signing (streaming + download), the unique public video ID, and the processing failure policy. Phase 03 is a backend-only delivery (per docs/phases/phase-03-videos/enunciado.md); frontend consumption of these contracts is deferred to Phases 04/05."
 ---
 
 # Technical Decisions — Phase 03: Upload e Processamento de Vídeos (Backend + Cross-layer)
@@ -11,7 +11,7 @@ scope_description: "Backend + cross-layer side of Phase 03 — object storage, b
 _Subprojects in scope:_
 
 - `nestjs-project/` — primary subproject. Receives the new `VideosModule` (entity, upload control-plane endpoints), the storage module (S3 client + presigner), the queue wiring, the video worker entrypoint, FFmpeg integration, and new Compose services (queue broker, object storage, worker) in `nestjs-project/compose.yaml`.
-- `next-frontend/` — **no Frontend-only TD in this document.** Per the user's slicing choice (same pattern as Phase 02), the upload UI, client upload library (Uppy 6 vs custom), resume-after-reload UX, progress UI and the E2E strategy for browser→storage traffic go into a separate frontend research doc (`scope_type: ad-hoc`, `related_phases: [3]`). Cross-layer TDs below (TD-04, TD-05, TD-07, TD-10, TD-11, TD-12, TD-14) describe the FE side of each contract explicitly so that doc inherits them.
+- `next-frontend/` — **no TD and no implementation work in Phase 03.** The challenge brief (`docs/phases/phase-03-videos/enunciado.md`) defines Phase 03 as a backend delivery: "a interface de vídeo não faz parte do escopo desta fase". Cross-layer TDs below (TD-04, TD-05, TD-07, TD-10, TD-11, TD-12, TD-14) fix the API contract and describe the FE side only so that Phases 04/05 inherit a stable contract; the upload UI, client library and player are built there.
 
 > Cross-doc anchors (already decided — do NOT reopen):
 > - **Strict BFF — single server-only `API_URL`:** `next-frontend-config-base/TD-03`. The browser never talks to NestJS; all control-plane calls go through `app/api/**` Route Handlers. The C4 diagram (`docs/diagrams/software-arch.mermaid`) already shows `Frontend → Object Storage` directly ("Streams"), so direct browser↔storage byte transfer is **not** a BFF violation — it is not NestJS traffic.
@@ -191,6 +191,14 @@ _Subprojects in scope:_
 
 **Decision:** **Option B (two orthogonal fields)**
 
+**Revisions:**
+- 2026-10-10 — Explicit mapping to the challenge brief's status cycle ("rascunho → processando → pronto/erro"):
+  "rascunho" = `published_at IS NULL` (default at pre-registration) while `processing_status = uploading`;
+  "processando" = `processing_status = processing`; "pronto/erro" = `processing_status = ready | failed`.
+  `published_at` has no transitions in Phase 03 (owned by Phase 04). Rationale: the brief's acceptance criterion
+  requires the cycle to be visibly reflected in the database; the two-axis model satisfies it and this entry makes
+  the correspondence traceable.
+
 ---
 
 ## TD-06: Upload Completion Signal and Processing Job Trigger
@@ -221,6 +229,21 @@ _Subprojects in scope:_
 **Recommendation:** **Option A (client-driven completion call)**. Under TD-04 A the client must call complete anyway to finalize the multipart upload, so making that call also the processing trigger adds no new signal and is identical across storage servers. Idempotent enqueue (`jobId = videoId`) makes retried `complete` calls safe. Abandoned uploads are TD-07's job.
 
 **Decision:** **Option B: Storage event notifications**
+
+**Revisions:**
+- 2026-10-10 — Rationale for choosing B over the recommendation, and the resulting mechanics. Rationale: processing
+  is triggered by a fact recorded by the storage (the object now exists), not by a client report, so a client that
+  disappears after `CompleteMultipartUpload` or a retried request cannot skip or duplicate processing; the trigger
+  is the same no matter which client (FE, script, future mobile app) performed the upload. Mechanics:
+  (1) the API `complete` endpoint still runs `CompleteMultipartUpload` (required by TD-04 A — S3 only finalizes a
+  multipart upload through that call) and returns `202 Accepted`, but **does not enqueue**;
+  (2) the bucket publishes `s3:ObjectCreated:CompleteMultipartUpload` for the originals prefix to an internal API
+  webhook (`POST /internal/storage-events`), authenticated by a shared token from env and excluded from the global
+  JWT guard (MinIO `notify_webhook` target, configured in the Compose init step);
+  (3) the consumer resolves the video from the object key, applies TD-07's size verification, moves
+  `processing_status` to `processing` and enqueues with `jobId = videoId` (idempotent against duplicate events);
+  (4) in production the same consumer service is fed by S3 → SQS/EventBridge through an adapter — only the transport
+  differs, the domain logic is shared. Accepted cost: server-specific notification config in dev vs prod.
 
 ---
 
@@ -256,6 +279,15 @@ _Subprojects in scope:_
 
 **Decision:** **Option A: Declare-and-verify, server-dictated part size, worker as final authority, storage-side cleanup**
 
+**Revisions:**
+- 2026-10-10 — Size verification moves from the `complete` endpoint to the TD-06 B event consumer (event `size` +
+  `HeadObject`; oversize → object deleted, video `failed`). Concrete values fixed: max size 10 GiB
+  (10 737 418 240 bytes); part size 64 MiB (≤160 parts); upload-part URL TTL 1 h; MIME allowlist `video/mp4`,
+  `video/quicktime`, `video/webm`, `video/x-matroska`; bucket lifecycle `AbortIncompleteMultipartUpload` after 1 day;
+  periodic sweep marks videos still `uploading` after 24 h as `failed`. Init accepts an optional `title`
+  (1–100 chars), defaulting to the filename without extension (truncated to 100). Rationale: TD-06 changed the
+  completion signal; the values were left to planning and the brief requires the persisted video to have a title.
+
 ---
 
 ## TD-08: FFmpeg Integration Approach
@@ -286,6 +318,15 @@ _Subprojects in scope:_
 **Recommendation:** **Option A (system FFmpeg in the image + typed `spawn` wrapper)**. The project already runs everything in containers, so the image is the natural place to pin FFmpeg. `ffprobe -print_format json` is a better contract than any wrapper's object model, and B is ruled out by deprecation.
 
 **Decision:** **Option B: `fluent-ffmpeg`**
+
+**Revisions:**
+- 2026-10-10 — Rationale for choosing B over the recommendation, and mitigations. Rationale: a familiar, widely
+  documented API (`ffprobe()` helper, chained input/output options, `screenshots`/filters) shortens the worker's
+  implementation and keeps FFmpeg command assembly readable; the package is a thin CLI wrapper, so its deprecation
+  does not change FFmpeg's behavior. Mitigations: exact pin `fluent-ffmpeg@2.1.3` + `@types/fluent-ffmpeg`;
+  ffmpeg/ffprobe installed from the OS package manager in the worker image (version controlled by the image, not
+  by npm); all usage confined to a single `FfmpegService` with typed results, so replacing it with Option A later
+  touches only that service, never the processor.
 
 ---
 
@@ -349,6 +390,12 @@ _Subprojects in scope:_
 
 **Decision:** **Option B (normalize to a single faststart H.264/AAC MP4)**
 
+**Revisions:**
+- 2026-10-10 — The original upload is **kept** alongside `playback.mp4`: the original is the download source
+  (TD-11) and the input for any future HLS upgrade (Option C); `playback.mp4` is the only streaming source.
+  Rationale: the "kept or discarded per policy" point was open, and download fidelity to the uploaded file is the
+  expected behavior for "Download do vídeo pelo usuário".
+
 ---
 
 ## TD-11: Media Delivery Path and URL Signing (Streaming + Download)
@@ -384,6 +431,15 @@ _Subprojects in scope:_
 **Recommendation:** **Option D (hybrid)**. Protecting video bytes for drafts and unlisted videos is a hard requirement of Phases 04–05, and thumbnail cacheability is a hard performance need for every listing page; D is the only option that gets both without routing bytes through the API. The `S3_ENDPOINT`/`S3_PUBLIC_ENDPOINT` split (or equivalent names) is part of this decision because it is the cross-component contract that makes presigned URLs work from the browser in Docker.
 
 **Decision:** **Option D: Hybrid — private videos via short-lived presigned URLs; thumbnails under a public-read prefix**
+
+**Revisions:**
+- 2026-10-10 — Phase 03 access scope and streaming semantics made explicit. In Phase 03 every video is a draft
+  (TD-05), so playback and download URLs are issued **only to the authenticated owner of the channel**; anonymous
+  access is introduced in Phase 05. Playback URL → `playback.mp4` (only when `processing_status = ready`); download
+  URL → the original with `ResponseContentDisposition=attachment; filename="<title>.<ext>"`. Streaming relies on
+  HTTP Range against the presigned GET: MinIO/S3 answer `Range: bytes=…` with `206 Partial Content`, which is how
+  the brief's "sem exigir download completo" is satisfied and verified. Rationale: the brief names Range/206
+  explicitly and Phase 03 had no stated access rule for draft media.
 
 ---
 
@@ -477,6 +533,38 @@ _Subprojects in scope:_
 
 ---
 
+## TD-15: Processing Failure Policy
+
+**Scope:** Backend
+
+**Capability:** Processamento automático do vídeo após upload (extração de duração e metadados)
+
+**Context:** The challenge brief explicitly requires deciding "o ciclo de status do vídeo e o que acontece em caso de falha no processamento". Processing (TD-08/09/10/13) can fail transiently (storage hiccup, worker restart, FFmpeg crash under load) or permanently (the file is not a video, codecs FFmpeg cannot decode). The outcome must end in a terminal `processing_status` (TD-05) with a reason the owner (and later the Phase 04 panel) can read. Depends on TD-02 (BullMQ retry primitives) and TD-05.
+
+**Options:**
+
+### Option A: Bounded retries with backoff, permanent errors fail fast, `failed` + reason
+- Jobs run with 3 attempts and exponential backoff. Errors classified as permanent (ffprobe finds no video stream / unreadable container / unsupported input) throw BullMQ's `UnrecoverableError`, skipping retries. When attempts are exhausted (including stalled jobs from a crashed worker), a `failed` handler sets `processing_status = failed` and a machine-readable `failure_reason`. The original object is kept.
+- **Pros:** Transient failures self-heal; garbage uploads do not burn retries. Terminal state is always reached. Uses only built-in BullMQ features.
+- **Cons:** Needs an error-classification step in the processor. Partial outputs (thumbnail written, playback not) must be cleaned or overwritten idempotently on retry.
+
+### Option B: Fail on first error
+- Any exception sets `failed` immediately (attempts = 1).
+- **Pros:** Simplest; no idempotency concerns across attempts.
+- **Cons:** A single network blip or worker restart permanently fails a valid 10GB upload, forcing a full re-upload.
+
+### Option C: Option A + owner-triggered reprocessing endpoint
+- Adds `POST /videos/:id/reprocess` for `failed` videos.
+- **Pros:** Recovery without re-upload after a fix.
+- **Cons:** No Phase 03 capability asks for it (extrapolation); adds an endpoint, authorization and state rules.
+
+**Recommendation:** **Option A**. It guarantees the brief's terminal states (pronto/erro) are always reached, tolerates the transient failures typical of a long-running job over a 10GB object, and avoids wasting retries on inputs that can never succeed — all with native BullMQ primitives (TD-02). Reprocessing (C) can be added in a later phase if needed.
+
+**Decision:** **Option A (bounded retries + fail-fast permanent errors + `failed` with reason)** — accepted by the user on 2026-10-10.
+
+---
+
+
 ## Decisions Summary
 
 | ID | Scope | Decision | Recommendation | Choice |
@@ -486,33 +574,36 @@ _Subprojects in scope:_
 | TD-03 | Backend | Video worker topology | **A** (separate container, same codebase, second entrypoint) | **A** |
 | TD-04 | Cross-layer | Upload protocol for ≤10GB resumable uploads | **A** (S3 multipart, presigned parts, API-mediated control plane) | **A** |
 | TD-05 | Cross-layer | Video lifecycle status modeling | **B** (processing status + publication state as separate fields) | **B** |
-| TD-06 | Backend | Upload completion signal and job trigger | **A** (client-driven `complete` call, idempotent enqueue) | **B** |
+| TD-06 | Backend | Upload completion signal and job trigger | **A** (client-driven `complete` call, idempotent enqueue) | **B** — see Revisions |
 | TD-07 | Cross-layer | Upload validation and limits policy | **A** (declare-and-verify, server-dictated part size, ffprobe authority, lifecycle cleanup) | **A** |
-| TD-08 | Backend | FFmpeg integration approach | **A** (system FFmpeg in image + typed `spawn` wrapper) | **B** |
+| TD-08 | Backend | FFmpeg integration approach | **A** (system FFmpeg in image + typed `spawn` wrapper) | **B** — see Revisions |
 | TD-09 | Backend | Worker access to the source file | **C** (hybrid: URL for probe/thumbnail, download for rewrite) | **C** |
 | TD-10 | Cross-layer | Streaming delivery format | **B** (normalize to faststart H.264/AAC MP4) | **B** |
 | TD-11 | Cross-layer | Media delivery path and URL signing | **D** (private videos via presigned; public-read thumbnail prefix) | **D** |
 | TD-12 | Cross-layer | Unique public video ID | **A** (random 11-char base64url `public_id`, UNIQUE) | **A** |
 | TD-13 | Backend | Thumbnail generation policy | **B** (seek + `thumbnail` filter window, JPEG 1280px) | **B** |
 | TD-14 | Cross-layer | Processing status propagation | **A** (polling via BFF) | **A** |
+| TD-15 | Backend | Processing failure policy | **A** (3 attempts + backoff, `UnrecoverableError` for permanent errors, `failed` + `failure_reason`) | **A** |
 
 ---
 
 ## Notes for downstream pipeline
 
-- **Slicing.** This is the backend + cross-layer doc for Phase 03 (`scope_type: phase`, no `covers_capabilities`, same pattern as `technical-decisions-phase-02-auth.md`). A frontend research doc for Phase 03 follows (the user confirmed the upload UI is in scope). It inherits TD-04/05/07/10/11/12/14 as constraints and should cover at least:
+- **Scope.** This is the single decisions doc for Phase 03 (`scope_type: phase`, no `covers_capabilities`). Per the challenge brief, Phase 03 is backend-only: no frontend slice is planned for this phase. Upload/streaming are exercised by backend e2e/integration tests that act as the client (presigned PUT/GET against the real storage container).
+- **FE hand-off (Phases 04/05).** When the frontend consumes these contracts, it inherits TD-04/05/07/10/11/12/14 as constraints and must decide at least:
   - the upload client library (Uppy 6 `@uppy/aws-s3` vs custom multipart uploader — must respect TD-04's server-mediated Create/Complete);
   - resume after page reload (Uppy Golden Retriever or equivalent; `File` handles are lost on reload, so the user must re-select the file);
   - progress/status UI;
   - the BFF Route Handlers for the upload control plane;
   - `next/image` `remotePatterns` for the thumbnail host (TD-11);
   - **the E2E strategy for browser→storage traffic.** Today's E2E rule fakes only upstream NestJS via server-side MSW, and direct PUTs to storage are not covered by that mechanism.
-- **Dependencies between TDs:** TD-04 → TD-06, TD-07 (both assume API-mediated multipart). TD-10 → TD-09 (if TD-10 = A, TD-09 collapses to A). TD-01 + TD-10 → TD-11. TD-02 → TD-03 (processor shape). TD-05 → TD-14 (polling stop condition).
+- **Dependencies between TDs:** TD-04 → TD-06, TD-07 (API-mediated multipart; under TD-06 B the size check lives in the event consumer — see TD-06/TD-07 Revisions). TD-02 + TD-05 → TD-15. TD-10 → TD-09 (if TD-10 = A, TD-09 collapses to A). TD-01 + TD-10 → TD-11. TD-02 → TD-03 (processor shape). TD-05 → TD-14 (polling stop condition).
 - **Testing guide revision required.** `.claude/skills/testing-guide-nestjs-project/references/external-systems.md` § "Object Storage — Local Filesystem" contradicts TD-01 A/B/C + TD-04 A. If those are accepted, `/plan-build` must include a task to rewrite that section ("real S3-compatible server in Docker, bucket cleaned between tests") and to concretize the queue section with the TD-02 choice. Integration tests then hit the real storage and Redis containers, consistent with the existing real-DB + Mailpit approach.
-- **New env keys (cross-component contract).** Storage (`S3_ENDPOINT`, `S3_PUBLIC_ENDPOINT`, `S3_REGION`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, bucket name(s)) and queue (`REDIS_HOST`, `REDIS_PORT`) keys go into `env.validation.ts` (Joi), new `registerAs` namespaces, `compose.yaml` and `.env.example`. Exact names are an implementation detail; the internal-vs-public endpoint split is part of TD-11. Per root `CLAUDE.md`, internal hosts use Compose service names; only `S3_PUBLIC_ENDPOINT` is a host-reachable URL (published port), because the browser consumes it.
-- **Compose topology.** `nestjs-project/compose.yaml` gains the storage service (+ bucket/CORS/lifecycle init), `redis` (if TD-02 = A) and `video-worker` (if TD-03 = A). The `next-frontend` stack stays separate; the browser reaches storage through the published host port.
+- **New env keys (cross-component contract).** Storage (`S3_ENDPOINT`, `S3_PUBLIC_ENDPOINT`, `S3_REGION`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, bucket name(s)) queue (`REDIS_HOST`, `REDIS_PORT`) and storage-event webhook (a shared token, e.g. `STORAGE_WEBHOOK_TOKEN`, per TD-06 Revision) keys go into `env.validation.ts` (Joi), new `registerAs` namespaces, `compose.yaml` and `.env.example`. Exact names are an implementation detail; the internal-vs-public endpoint split is part of TD-11. Per root `CLAUDE.md`, internal hosts use Compose service names; only `S3_PUBLIC_ENDPOINT` is a host-reachable URL (published port), because the browser consumes it.
+- **Compose topology.** `nestjs-project/compose.yaml` gains the storage service (+ init step for bucket, CORS, lifecycle, the public-read thumbnail prefix policy and the `notify_webhook` target pointing at the API by service name — TD-06 Revision), `redis` (TD-02 A) and `video-worker` (TD-03 A). The `next-frontend` stack stays separate; the browser reaches storage through the published host port.
 - **Bucket CORS** must allow the FE origin (`http://localhost:3001` in dev), the methods `PUT`/`GET`/`HEAD`, and expose `ETag` (required by TD-04 A for multipart completion).
 - **Phase 04 hand-off.** TD-05 B leaves the publication field defaulting to draft with no transitions; Phase 04 owns publish/visibility. TD-13's automatic thumbnail is replaced by Phase 04's custom thumbnail upload, which can reuse TD-11's public thumbnail prefix.
+- **Streaming verification.** TD-11 Revision: backend e2e verifies streaming by requesting the playback presigned URL with `Range: bytes=0-1023` and asserting `206 Partial Content`.
 - **Phase 05 hand-off.** TD-10 B means a plain `<video src={presignedUrl}>` player. TD-11 D means the watch page requests a fresh presigned URL per view. TD-12's `public_id` is the watch-route identifier.
 
 Sources consulted during research:
