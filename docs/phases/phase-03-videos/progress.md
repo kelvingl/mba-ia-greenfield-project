@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 2/15 completed
+**SIs:** 3/15 completed
 
 ### SI-03.1 — Infra: Dependências, Namespaces de Configuração e Validação de Env
 - **Status:** completed
@@ -27,9 +27,15 @@
   - Os serviços `video-worker` e a notificação de bucket (`notify_webhook`) ficam para o SI-03.4 e o SI-03.8, como no plano.
 
 ### SI-03.3 — Módulo de Storage sobre a API S3
-- **Status:** pending
-- **Tests:** —
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 17 passing (2 unit de módulo, 8 unit de chaves, 7 integração contra MinIO real)
+- **Observations:**
+  - Dois clientes S3 (interno e assinador público), ambos com `forcePathStyle` e checksums `WHEN_REQUIRED`. O teste de módulo confere que o host de cada um bate com `S3_ENDPOINT`/`S3_PUBLIC_ENDPOINT`.
+  - **Integração:** `S3_PUBLIC_ENDPOINT` aponta para `localhost:9000`, inalcançável de dentro do container. Por isso o spec monta dois serviços: um com o endpoint público real (só confere a forma das URLs: origem, `X-Amz-Expires` 3600 e 900) e outro com o público sobrescrito para o interno (faz os PUT/GET de verdade).
+  - `src/test/s3.ts` usa um bucket de teste separado (`<S3_BUCKET>-test`), criado sob demanda com a mesma policy de `thumbnails/`, e o esvazia (objetos + multiparts pendentes) a cada teste.
+  - `putObjectFromFile` usa `PutObject` com stream e `ContentLength`: limite de 5 GB por objeto. O `playback.mp4` normalmente é bem menor que o original, mas uma normalização de um upload perto de 10 GB poderia estourar. Se virar problema, o caminho é multipart no worker; fica registrado como risco, sem ação neste SI.
+  - O teste de `storage-keys.spec.ts` foi escrito junto com o código, sem etapa vermelha separada (função pura trivial).
+  - Erro tipado `InvalidUploadPartsError` mapeia `InvalidPart`, `InvalidPartOrder`, `EntityTooSmall` e `NoSuchUpload`. Só `InvalidPart` foi exercitado contra o MinIO (ETag adulterado).
 
 ### SI-03.4 — Módulo de Fila e Entrypoint do Video Worker
 - **Status:** pending
