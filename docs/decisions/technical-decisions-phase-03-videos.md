@@ -63,6 +63,12 @@ _Subprojects in scope:_
 **Recommendation:** **Option A (MinIO, pinned)**, used strictly as a dev/test emulator, with the code bound only to the S3 API through the AWS SDK v3. Replacing the server later (with B, if MinIO's frozen state becomes a problem) is then a `compose.yaml` change, not a code change. MinIO gives the fastest path to a working presigned-multipart + CORS + lifecycle setup, and those are exactly the behaviors TD-04/07/11 depend on. Its abandonment is a real cost, but it is bounded because production is S3. Option B is the honest maintained alternative and becomes the recommendation if the team does not accept a frozen dev dependency. Option D is rejected because it cannot support direct-to-storage transfer. Choosing A, B or C requires revising the testing guide's storage section (see Notes).
 
 **Decision:** : **Option A (MinIO, pinned)**
+**Libraries:** @aws-sdk/client-s3, @aws-sdk/s3-request-presigner
+
+**Revisions:**
+- 2026-10-10 — `**Libraries:**` field filled with the AWS SDK v3 packages the Recommendation already names (S3 client +
+  presigner for multipart parts and GET URLs). Rationale: resolves validation IC-3 — the empty field kept these
+  dependencies out of library-refs.md and doc lookups. Decision A unchanged.
 
 ---
 
@@ -94,6 +100,12 @@ _Subprojects in scope:_
 **Recommendation:** **Option A (BullMQ + Redis)**. The workload is job-shaped: long-running, retryable, with progress and per-job state the API may read back (TD-14). BullMQ models that natively, and `@nestjs/bullmq` gives the worker (TD-03) a first-party processor abstraction. Redis is a small, well-understood addition, and the testing guide already assumes it. Option B is a legitimate choice if the team prefers zero new infrastructure: its transactional enqueue is a real advantage, paid for with a hand-written integration. Option C buys routing flexibility the project does not need.
 
 **Decision:** **Option A (BullMQ + Redis)**
+**Libraries:** bullmq, @nestjs/bullmq
+
+**Revisions:**
+- 2026-10-10 — `**Libraries:**` field filled with `bullmq` and `@nestjs/bullmq`, as the Recommendation names; the
+  installed BullMQ major must provide Job Schedulers (`upsertJobScheduler`), which TD-16 relies on. Rationale: resolves
+  validation IC-3 — the empty field kept these dependencies out of library-refs.md and doc lookups. Decision A unchanged.
 
 ---
 
@@ -160,6 +172,12 @@ _Subprojects in scope:_
 **Recommendation:** **Option A (S3 multipart with presigned parts, API-mediated control plane)**. It is the only option where 10GB of bytes touch neither Next nor Nest without introducing a new public service, which satisfies both the performance capability and the strict BFF. Resume falls out of S3's own list-parts semantics. Keeping Create/Complete on the server is deliberate: the API learns about completion synchronously, which is the trigger for processing (TD-06) and the point where size validation happens (TD-07). The frontend doc must pick a client configuration that respects this; Uppy 6's `signRequest` mode moves Create/Complete to the client, so it either needs a server-mediated wrapper or a custom uploader.
 
 **Decision:** **Option A (S3 multipart with presigned parts, API-mediated control plane)**
+
+**Revisions:**
+- 2026-10-10 — Recommendation's completion rationale superseded: under TD-06 B the `complete` endpoint only runs
+  `CompleteMultipartUpload` and returns `202 Accepted`; the processing trigger and the size check live in the TD-06 B
+  storage-event consumer (TD-07 Revision), not in `complete`. Rationale: aligned with the TD-06 B decision. Decision A
+  (S3 multipart, presigned parts, API-mediated Create/Complete) unchanged.
 
 ---
 
@@ -318,6 +336,7 @@ _Subprojects in scope:_
 **Recommendation:** **Option A (system FFmpeg in the image + typed `spawn` wrapper)**. The project already runs everything in containers, so the image is the natural place to pin FFmpeg. `ffprobe -print_format json` is a better contract than any wrapper's object model, and B is ruled out by deprecation.
 
 **Decision:** **Option B: `fluent-ffmpeg`**
+**Libraries:** fluent-ffmpeg, @types/fluent-ffmpeg
 
 **Revisions:**
 - 2026-10-10 — Rationale for choosing B over the recommendation, and mitigations. Rationale: a familiar, widely
@@ -327,6 +346,9 @@ _Subprojects in scope:_
   ffmpeg/ffprobe installed from the OS package manager in the worker image (version controlled by the image, not
   by npm); all usage confined to a single `FfmpegService` with typed results, so replacing it with Option A later
   touches only that service, never the processor.
+- 2026-10-10 — `**Libraries:**` field filled with `fluent-ffmpeg` (exact pin 2.1.3, per the revision above) and
+  `@types/fluent-ffmpeg`. Rationale: resolves validation IC-3 — the empty field kept these dependencies out of
+  library-refs.md and doc lookups. Decision B unchanged.
 
 ---
 
