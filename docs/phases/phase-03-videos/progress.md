@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
-**Status:** in_progress
-**SIs:** 14/15 completed
+**Status:** completed
+**SIs:** 15/15 completed
 
 ### SI-03.1 — Infra: Dependências, Namespaces de Configuração e Validação de Env
 - **Status:** completed
@@ -164,6 +164,17 @@
   - **Fora de escopo, anotado:** specs anteriores deixam chaves em Redis com prefixo `test-*` (`:meta`, `events`, e schedulers `repeat:stale-upload-sweep` dos specs do `WorkerModule`). São inofensivas, mas se acumulam; vale um `obliterate` em `afterAll` desses specs ou uma limpeza global dos prefixos `test-*`.
 
 ### SI-03.15 — Atualizar CLAUDE.md com a Seção de Vídeos
-- **Status:** pending
-- **Tests:** —
-- **Observations:** none
+- **Status:** completed
+- **Tests:** no tests (documentation SI); critério de aceite verificado por script: todos os caminhos, serviços do Compose, scripts npm e variáveis de ambiente citados existem no repositório
+- **Observations:**
+  - `CLAUDE.md` raiz: fila deixou de ser "TBD" (BullMQ + Redis), e o worker e o storage (MinIO em dev, S3 em prod) estão descritos.
+  - `nestjs-project/CLAUDE.md`: serviços do Compose, verificações de prontidão, seção de teste com MinIO/Redis reais (bucket de teste, `QUEUE_PREFIX`, `S3_PUBLIC_ENDPOINT`, `waitFor`, fixtures) e a seção `## Videos`.
+  - **Divergência do plano:** o critério pedia "`minio`/`redis` healthy", mas o `minio` (imagem distroless) não tem healthcheck; a documentação diz `running` + `minio-init` com `Exited (0)`. Só `db` e `redis` têm healthcheck.
+  - O texto avisa que a notificação do MinIO só chega enquanto o dev server da API está rodando (o container `nestjs-api` não o inicia sozinho); eventos nesse intervalo esperam na fila persistente do MinIO.
+
+## Final verification
+
+- `npx tsc --noEmit`: exit 0. `npm run build`: exit 0.
+- Suíte `src` (unit + integração, `--runInBand`): 47 suítes, 323 testes passando. E2E: 8 suítes, 77 testes passando.
+- `npm run lint`: **não passa, por débito anterior à fase**: 150 erros e 40 avisos em 11 arquivos antigos (`auth.service*.spec.ts`, `channels.service*.ts`, `*-exception.filter.spec.ts`, `env.validation.integration-spec.ts`, `mail.service.integration-spec.ts`, `create-test-data-source.ts`, `users.service.integration-spec.ts`, `test/auth.e2e-spec.ts`). Os números são idênticos aos de antes da Fase 03 e nenhum arquivo criado ou alterado pela fase tem erro de lint. Pelo Definition of Done isso bloqueia o "feito"; precisa de uma tarefa própria (corrigir os arquivos antigos).
+- Itens em aberto para decisão/tarefa separada: `ioredis` não consta em TD-02/`library-refs.md`; `complete` repetido responde `400 INVALID_UPLOAD_PARTS` (não idempotente); `putObjectFromFile` usa `PutObject` único (limite de 5 GB do S3) e estoura para um `playback.mp4` de ~10 GB; specs antigos deixam chaves `test-*` no Redis.
