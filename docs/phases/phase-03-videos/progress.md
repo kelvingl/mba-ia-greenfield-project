@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 12/15 completed
+**SIs:** 13/15 completed
 
 ### SI-03.1 — Infra: Dependências, Namespaces de Configuração e Validação de Env
 - **Status:** completed
@@ -144,9 +144,13 @@
   - Fora do plano: nenhum. O e2e confere o `thumbnail_url` anônimo (200, `image/jpeg`) contra o bucket de teste, que recebe a mesma política pública do bucket real.
 
 ### SI-03.13 — Documentação OpenAPI dos Endpoints de Vídeo e Sincronização do Contrato
-- **Status:** pending
-- **Tests:** —
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 323 passing na suíte `src` (era 313; +10 em `openapi-export.integration-spec.ts`) e 75 e2e; `tsc` exit 0
+- **Observations:**
+  - Os decoradores e DTOs de resposta já tinham sido escritos nos SIs 03.6/03.7/03.12; este SI virou a verificação por teste, que achou dois defeitos reais no `VideosController`: `@ApiBearerAuth()` sem nome gerava o esquema `bearer`, mas o projeto declara `access-token` (então nenhuma operação de vídeo tinha `security` válida no documento), e `POST /videos` não documentava o `404 CHANNEL_NOT_FOUND`. Ambos corrigidos.
+  - O spec novo confere, para cada uma das 7 operações, o conjunto exato de status, o envelope de erro em todo `4xx`, `summary` e o requisito `access-token`; que não há nenhum path `/internal`; e que o `nestjs-project/openapi.json` commitado é igual ao documento gerado (falha se alguém esquecer de rodar `npm run openapi:export`).
+  - **Divergência do plano:** a técnica 4 manda commitar `next-frontend/openapi.json`, mas esse arquivo está no `.gitignore` do `next-frontend` (linha 42), por decisão do próprio frontend. O script `sync-openapi.sh` o copia normalmente (idêntico ao do backend, conferido com `cmp`), mas só `next-frontend/lib/api/types.gen.ts` (+517 linhas, nenhuma remoção) entra no commit. É a única mudança em `next-frontend`.
+  - A Swagger UI continua só em dev/staging: não mexi em `SWAGGER_ENABLED`.
 
 ### SI-03.14 — Verificação Ponta a Ponta do Pipeline de Vídeo
 - **Status:** pending

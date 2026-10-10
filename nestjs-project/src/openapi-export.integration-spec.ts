@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { exportSpec } from './openapi-export';
@@ -127,5 +128,75 @@ describe('exportSpec (integration)', () => {
         expect((operation.summary as string).length).toBeGreaterThan(0);
       }
     }
+  });
+
+  describe('video endpoints', () => {
+    type Operation = { responses: Record<string, Record<string, unknown>> };
+    const paths = () =>
+      document.paths as Record<string, Record<string, Operation>>;
+
+    const VIDEO_OPERATIONS: [string, string, string[]][] = [
+      ['post', '/videos', ['201', '400', '401', '404']],
+      [
+        'post',
+        '/videos/{publicId}/upload/part-urls',
+        ['200', '400', '401', '404', '409'],
+      ],
+      ['get', '/videos/{publicId}/upload/parts', ['200', '401', '404', '409']],
+      [
+        'post',
+        '/videos/{publicId}/upload/complete',
+        ['202', '400', '401', '404', '409'],
+      ],
+      ['get', '/videos/{publicId}', ['200', '401', '404']],
+      ['get', '/videos/{publicId}/playback-url', ['200', '401', '404', '409']],
+      ['get', '/videos/{publicId}/download-url', ['200', '401', '404', '409']],
+    ];
+
+    it.each(VIDEO_OPERATIONS)(
+      '%s %s documents its status codes with the error envelope on every 4xx',
+      (method, path, statuses) => {
+        const operation = paths()[path]?.[method];
+
+        expect(operation).toBeDefined();
+        expect(Object.keys(operation.responses).sort()).toEqual(statuses);
+        for (const status of statuses.filter((code) => code.startsWith('4'))) {
+          const schema = (
+            operation.responses[status].content as Record<
+              string,
+              { schema: Record<string, unknown> }
+            >
+          )['application/json'].schema;
+          expect(schema['$ref']).toBe('#/components/schemas/ApiErrorEnvelope');
+        }
+      },
+    );
+
+    it('requires the access token and a summary on every video operation', () => {
+      for (const [method, path] of VIDEO_OPERATIONS) {
+        const operation = paths()[path][method] as unknown as {
+          summary: string;
+          security: Record<string, unknown>[];
+        };
+        expect(operation.summary.length).toBeGreaterThan(0);
+        expect(operation.security.some((req) => 'access-token' in req)).toBe(
+          true,
+        );
+      }
+    });
+
+    it('keeps the internal storage webhook out of the document', () => {
+      expect(
+        Object.keys(paths()).filter((p) => p.startsWith('/internal')),
+      ).toEqual([]);
+    });
+  });
+
+  it('matches the committed openapi.json artifact', () => {
+    const committed = JSON.parse(
+      readFileSync(resolve(__dirname, '..', 'openapi.json'), 'utf-8'),
+    ) as unknown;
+
+    expect(document).toEqual(committed);
   });
 });

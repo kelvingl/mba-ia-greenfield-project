@@ -38,7 +38,7 @@ import { VideosService } from './videos.service';
 // auth-oriented global rate limit (10/min) does not apply here.
 @SkipThrottle()
 @ApiTags('videos')
-@ApiBearerAuth()
+@ApiBearerAuth('access-token')
 @Controller('videos')
 export class VideosController {
   constructor(private readonly videosService: VideosService) {}
@@ -63,6 +63,11 @@ export class VideosController {
   @ApiResponse({
     status: 401,
     description: 'Missing or invalid access token',
+    schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'The caller has no channel to upload to',
     schema: { $ref: getSchemaPath(ApiErrorEnvelope) },
   })
   async create(
