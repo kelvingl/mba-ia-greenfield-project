@@ -1,7 +1,7 @@
 # phase-03-videos — Progress
 
 **Status:** in_progress
-**SIs:** 13/15 completed
+**SIs:** 14/15 completed
 
 ### SI-03.1 — Infra: Dependências, Namespaces de Configuração e Validação de Env
 - **Status:** completed
@@ -153,9 +153,15 @@
   - A Swagger UI continua só em dev/staging: não mexi em `SWAGGER_ENABLED`.
 
 ### SI-03.14 — Verificação Ponta a Ponta do Pipeline de Vídeo
-- **Status:** pending
-- **Tests:** —
-- **Observations:** none
+- **Status:** completed
+- **Tests:** 77 e2e (era 75; +2 em `test/videos-pipeline.e2e-spec.ts`), 323 na suíte `src`; `tsc` exit 0; o spec novo passou 3 vezes seguidas
+- **Observations:**
+  - Cobre o fluxo inteiro com API e `WorkerModule` no mesmo processo e infra real: `POST /videos`, partes presigned enviadas por `PUT`, `complete`, evento entregue em `/internal/storage-events`, polling até `ready`, `206` por Range e download com bytes idênticos. O caminho de erro (bytes aleatórios como `video/mp4`) termina `failed`/`not_a_video` e `playback-url` responde `409`.
+  - A sequência `uploading → processing → ready` é verificada amostrando a linha a cada 15 ms. Na primeira versão a amostra inicial era atrasada e perdia o `uploading` (o evento chegava antes da primeira leitura); agora a primeira leitura é feita antes de entregar o evento. Como é amostragem, a sequência é "observada", não garantida, para transições mais rápidas que 15 ms; aqui o processamento leva centenas de ms.
+  - O item 1 do plano (`prefix` no `queueConfig`) já tinha sido feito no SI-03.1/03.4.
+  - O evento é entregue pelo teste, não pelo MinIO (o bucket de teste não tem notificação configurada); a entrega real MinIO → API foi verificada à mão no SI-03.8 (header `Bearer <token>` e chave `originals/...`).
+  - Teardown: bucket esvaziado, as duas filas obliteradas e tabelas limpas; conferido no Redis que o spec não deixa chaves.
+  - **Fora de escopo, anotado:** specs anteriores deixam chaves em Redis com prefixo `test-*` (`:meta`, `events`, e schedulers `repeat:stale-upload-sweep` dos specs do `WorkerModule`). São inofensivas, mas se acumulam; vale um `obliterate` em `afterAll` desses specs ou uma limpeza global dos prefixos `test-*`.
 
 ### SI-03.15 — Atualizar CLAUDE.md com a Seção de Vídeos
 - **Status:** pending
