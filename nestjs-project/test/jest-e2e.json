@@ -24,6 +24,7 @@
   "setupFiles": [
     "dotenv/config"
   ],
+  "globalTeardown": "<rootDir>/../src/test/global-teardown.ts",
   "transformIgnorePatterns": [
     "/node_modules/(?!@nestjs/(bullmq|bull-shared)/)"
   ]
