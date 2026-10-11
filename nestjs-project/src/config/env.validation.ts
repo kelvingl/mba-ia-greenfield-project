@@ -27,6 +27,11 @@ export const envValidationSchema = Joi.object({
   S3_SECRET_ACCESS_KEY: Joi.string().required(),
   S3_BUCKET: Joi.string().required(),
   S3_DELIVERY_URL_TTL_SECONDS: Joi.number().integer().positive().default(900),
+  // Part size of server-side multipart uploads (S3 minimum is 5 MiB).
+  S3_UPLOAD_PART_SIZE_BYTES: Joi.number()
+    .integer()
+    .min(5 * 1024 * 1024)
+    .default(64 * 1024 * 1024),
   STORAGE_WEBHOOK_TOKEN: Joi.string().required(),
   REDIS_HOST: Joi.string().required(),
   REDIS_PORT: Joi.number().port().required(),

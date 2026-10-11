@@ -12,5 +12,9 @@ export default registerAs('storage', () => ({
     process.env.S3_DELIVERY_URL_TTL_SECONDS || '900',
     10,
   ),
+  uploadPartSizeBytes: parseInt(
+    process.env.S3_UPLOAD_PART_SIZE_BYTES || String(64 * 1024 * 1024),
+    10,
+  ),
   webhookToken: process.env.STORAGE_WEBHOOK_TOKEN as string,
 }));

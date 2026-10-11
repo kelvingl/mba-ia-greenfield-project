@@ -30,6 +30,8 @@ describe('StorageService (integration, real MinIO)', () => {
   let shapeService: StorageService;
   let module: TestingModule;
   let service: StorageService;
+  let partedModule: TestingModule;
+  let partedService: StorageService;
 
   beforeAll(async () => {
     useTestBucket();
@@ -42,6 +44,10 @@ describe('StorageService (integration, real MinIO)', () => {
     process.env.S3_PUBLIC_ENDPOINT = process.env.S3_ENDPOINT;
     ({ module, service } = await buildService());
     process.env.S3_PUBLIC_ENDPOINT = originalPublicEndpoint;
+
+    process.env.S3_UPLOAD_PART_SIZE_BYTES = String(FIVE_MIB);
+    ({ module: partedModule, service: partedService } = await buildService());
+    delete process.env.S3_UPLOAD_PART_SIZE_BYTES;
   });
 
   beforeEach(async () => {
@@ -50,6 +56,7 @@ describe('StorageService (integration, real MinIO)', () => {
 
   afterAll(async () => {
     await module.close();
+    await partedModule.close();
     await shapeModule.close();
   });
 
@@ -109,6 +116,28 @@ describe('StorageService (integration, real MinIO)', () => {
     expect(res.status).toBe(206);
     expect(res.headers.get('content-length')).toBe('1024');
     expect(res.headers.get('content-range')).toBe('bytes 0-1023/4096');
+  });
+
+  it('should upload a file larger than the part size as a multipart object', async () => {
+    const key = 'playback/v-multipart.mp4';
+    const dir = await mkdtemp(join(tmpdir(), 'storage-'));
+    const source = join(dir, 'in.mp4');
+    const target = join(dir, 'out.mp4');
+    // 12 MiB with a 5 MiB part size => 3 parts.
+    await writeFile(source, Buffer.alloc(12 * 1024 * 1024, 9));
+    try {
+      await partedService.putObjectFromFile(key, source, 'video/mp4');
+
+      const url = await service.presignGet(key);
+      const probe = await fetch(url, { headers: { Range: 'bytes=0-0' } });
+      expect(probe.headers.get('etag')).toMatch(/-3"$/);
+      await service.downloadObjectToFile(key, target);
+      expect((await readFile(target)).equals(await readFile(source))).toBe(
+        true,
+      );
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   it('should download an object to a local file', async () => {

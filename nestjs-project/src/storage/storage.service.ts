@@ -1,5 +1,4 @@
 import { createReadStream, createWriteStream } from 'node:fs';
-import { stat } from 'node:fs/promises';
 import type { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import {
@@ -9,10 +8,10 @@ import {
   GetObjectCommand,
   HeadObjectCommand,
   ListPartsCommand,
-  PutObjectCommand,
   S3Client,
   UploadPartCommand,
 } from '@aws-sdk/client-s3';
+import { Upload } from '@aws-sdk/lib-storage';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { Inject, Injectable } from '@nestjs/common';
 import type { ConfigType } from '@nestjs/config';
@@ -169,21 +168,25 @@ export class StorageService {
     );
   }
 
+  /**
+   * Streams a local file as a multipart upload: a single PutObject is capped at
+   * 5 GB, while playback remuxes of 10 GB originals must fit.
+   */
   async putObjectFromFile(
     key: string,
     filePath: string,
     contentType: string,
   ): Promise<void> {
-    const { size } = await stat(filePath);
-    await this.internalClient.send(
-      new PutObjectCommand({
+    await new Upload({
+      client: this.internalClient,
+      params: {
         Bucket: this.config.bucket,
         Key: key,
         Body: createReadStream(filePath),
-        ContentLength: size,
         ContentType: contentType,
-      }),
-    );
+      },
+      partSize: this.config.uploadPartSizeBytes,
+    }).done();
   }
 
   /** Streams an object to a local file without holding it in memory. */
