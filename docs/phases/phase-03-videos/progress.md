@@ -174,7 +174,11 @@
 
 ## Final verification
 
-- `npx tsc --noEmit`: exit 0. `npm run build`: exit 0.
-- Suíte `src` (unit + integração, `--runInBand`): 47 suítes, 323 testes passando. E2E: 8 suítes, 77 testes passando.
-- `npm run lint`: **não passa, por débito anterior à fase**: 150 erros e 40 avisos em 11 arquivos antigos (`auth.service*.spec.ts`, `channels.service*.ts`, `*-exception.filter.spec.ts`, `env.validation.integration-spec.ts`, `mail.service.integration-spec.ts`, `create-test-data-source.ts`, `users.service.integration-spec.ts`, `test/auth.e2e-spec.ts`). Os números são idênticos aos de antes da Fase 03 e nenhum arquivo criado ou alterado pela fase tem erro de lint. Pelo Definition of Done isso bloqueia o "feito"; precisa de uma tarefa própria (corrigir os arquivos antigos).
-- Itens em aberto para decisão/tarefa separada: `ioredis` não consta em TD-02/`library-refs.md`; `complete` repetido responde `400 INVALID_UPLOAD_PARTS` (não idempotente); `putObjectFromFile` usa `PutObject` único (limite de 5 GB do S3) e estoura para um `playback.mp4` de ~10 GB; specs antigos deixam chaves `test-*` no Redis.
+- `npx tsc --noEmit`, `npm run lint` e `npm run build`: exit 0.
+- Suíte `src` (unit + integração, `--runInBand`): 47 suítes, 326 testes passando. E2E: 8 suítes, 78 testes passando.
+- Itens que estavam em aberto, resolvidos depois da implementação das SIs:
+  - Dívida de lint nos 11 arquivos antigos: corrigida (mocks e corpos de resposta tipados, sem mudar comportamento).
+  - `putObjectFromFile`: agora usa upload multipart (`@aws-sdk/lib-storage`, partes de `S3_UPLOAD_PART_SIZE_BYTES`, padrão 64 MiB), sem o limite de 5 GB.
+  - `complete` idempotente: repetido com o objeto já existente responde `202` (revisão no TD-04).
+  - `ioredis` e `@aws-sdk/lib-storage` registrados em TD-02/TD-01 e em `library-refs.md`.
+  - Chaves `test-*` no Redis: um `globalTeardown` do Jest as apaga ao fim de cada execução; `npm test` agora roda com `--runInBand`.
