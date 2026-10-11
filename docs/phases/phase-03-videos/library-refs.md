@@ -8,6 +8,14 @@ libs:
     version: "^3.1149.0"
     context7_id: "/aws/aws-sdk-js-v3"
     fetched_at: "2026-10-10T13:33:16-03:00"
+  "@aws-sdk/lib-storage":
+    version: "^3.1149.0"
+    context7_id: "/aws/aws-sdk-js-v3"
+    fetched_at: "2026-10-11T00:00:00-03:00"
+  "ioredis":
+    version: "^5.11.1"
+    context7_id: "/redis/ioredis"
+    fetched_at: "2026-10-11T00:00:00-03:00"
   "bullmq":
     version: "^6.3.12"
     context7_id: "/websites/bullmq_io"
@@ -49,6 +57,18 @@ Used by TD-04 (part URLs, TTL 1 h per TD-07) and TD-11 (playback and download UR
 - **Download (TD-11 Revision):** `new GetObjectCommand({ Bucket, Key, ResponseContentDisposition: 'attachment; filename="<title>.<ext>"' })`. Response-header overrides only work on **signed** requests, which is what presigned URLs are.
 - **Playback (TD-11):** a presigned GET on `playback.mp4`. Range requests (`Range: bytes=…` → `206`) are answered by S3/MinIO; no SDK code is involved.
 - Sign with the **public-endpoint** client (see client-s3 notes above).
+
+### @aws-sdk/lib-storage
+
+Used by TD-01 for server-side uploads of large files (the worker's playback MP4).
+
+- `new Upload({ client, params: { Bucket, Key, Body, ContentType }, partSize, queueSize }).done()` — splits a stream into a multipart upload, so objects above the 5 GB `PutObject` cap work. `partSize` is at least 5 MiB (the project uses `S3_UPLOAD_PART_SIZE_BYTES`, default 64 MiB); `queueSize` defaults to 4.
+- Bodies at most one part long are sent as a single `PutObject`; the multipart ETag (`...-N`) only appears above `partSize`.
+- On failure it aborts the multipart upload unless `leavePartsOnError` is set.
+
+### ioredis
+
+Used by TD-02: the Redis client BullMQ connects through, installed as an explicit dependency. The project code does not import it directly; connection options are passed to `BullModule.forRootAsync`.
 
 ### bullmq
 

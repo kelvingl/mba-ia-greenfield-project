@@ -3,15 +3,26 @@ import { User } from '../users/entities/user.entity';
 import { Channel } from '../channels/entities/channel.entity';
 import { RefreshToken } from '../auth/entities/refresh-token.entity';
 import { VerificationToken } from '../auth/entities/verification-token.entity';
+import { Video } from '../videos/entities/video.entity';
 import { CreateUsersAndChannels1775687773260 } from './migrations/1775687773260-CreateUsersAndChannels';
 import { CreateAuthTokens1777579850478 } from './migrations/1777579850478-CreateAuthTokens';
+import { CreateVideos1791667207602 } from './migrations/1791667207602-CreateVideos';
 import { createTestDataSource } from '../test/create-test-data-source';
 
+// Ordered children first (videos/tokens reference channels/users).
 const MANAGED_TABLES = [
-  'users',
-  'channels',
+  'videos',
   'refresh_tokens',
   'verification_tokens',
+  'channels',
+  'users',
+];
+
+// Enum types created by the migrations. `DROP TABLE` leaves them behind, so
+// they must be dropped explicitly or a rerun fails with "type already exists".
+const MANAGED_TYPES = [
+  'verification_tokens_type_enum',
+  'video_processing_status',
 ];
 
 describe('Database migrations (integration)', () => {
@@ -19,24 +30,27 @@ describe('Database migrations (integration)', () => {
 
   beforeAll(async () => {
     dataSource = createTestDataSource(
-      [User, Channel, RefreshToken, VerificationToken],
+      [User, Channel, RefreshToken, VerificationToken, Video],
       {
         synchronize: false,
         migrations: [
           CreateUsersAndChannels1775687773260,
           CreateAuthTokens1777579850478,
+          CreateVideos1791667207602,
         ],
       },
     );
 
     await dataSource.initialize();
 
-    await Promise.all([
-      ...MANAGED_TABLES.map((table) =>
-        dataSource.query(`DROP TABLE IF EXISTS "${table}" CASCADE`),
-      ),
-      dataSource.query(`DROP TABLE IF EXISTS "migrations" CASCADE`),
-    ]);
+    // Sequential, children first: parallel DROP ... CASCADE statements contend
+    // for locks on the tables that reference each other (intermittent failures).
+    for (const table of [...MANAGED_TABLES, 'migrations']) {
+      await dataSource.query(`DROP TABLE IF EXISTS "${table}" CASCADE`);
+    }
+    for (const type of MANAGED_TYPES) {
+      await dataSource.query(`DROP TYPE IF EXISTS "${type}"`);
+    }
   });
 
   afterAll(async () => {
@@ -46,10 +60,10 @@ describe('Database migrations (integration)', () => {
     await dataSource.destroy();
   });
 
-  it('should apply all migrations and create all four tables', async () => {
+  it('should apply all migrations and create all five tables', async () => {
     const ranMigrations = await dataSource.runMigrations();
 
-    expect(ranMigrations).toHaveLength(2);
+    expect(ranMigrations).toHaveLength(3);
 
     const result = await dataSource.query<{ table_name: string }[]>(
       `SELECT table_name FROM information_schema.tables
@@ -64,10 +78,25 @@ describe('Database migrations (integration)', () => {
       'refresh_tokens',
       'users',
       'verification_tokens',
+      'videos',
     ]);
   });
 
-  it('should revert the last migration and remove token tables', async () => {
+  it('should revert the last migration and remove the videos table and enum', async () => {
+    await dataSource.undoLastMigration();
+
+    const tables = await dataSource.query<{ table_name: string }[]>(
+      `SELECT table_name FROM information_schema.tables
+       WHERE table_schema = 'public' AND table_name = 'videos'`,
+    );
+    const types = await dataSource.query<{ typname: string }[]>(
+      `SELECT typname FROM pg_type WHERE typname = 'video_processing_status'`,
+    );
+    expect(tables).toHaveLength(0);
+    expect(types).toHaveLength(0);
+  });
+
+  it('should revert the auth tokens migration and remove token tables', async () => {
     await dataSource.undoLastMigration();
 
     const result = await dataSource.query<{ table_name: string }[]>(

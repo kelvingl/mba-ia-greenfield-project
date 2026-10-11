@@ -63,7 +63,7 @@ _Subprojects in scope:_
 **Recommendation:** **Option A (MinIO, pinned)**, used strictly as a dev/test emulator, with the code bound only to the S3 API through the AWS SDK v3. Replacing the server later (with B, if MinIO's frozen state becomes a problem) is then a `compose.yaml` change, not a code change. MinIO gives the fastest path to a working presigned-multipart + CORS + lifecycle setup, and those are exactly the behaviors TD-04/07/11 depend on. Its abandonment is a real cost, but it is bounded because production is S3. Option B is the honest maintained alternative and becomes the recommendation if the team does not accept a frozen dev dependency. Option D is rejected because it cannot support direct-to-storage transfer. Choosing A, B or C requires revising the testing guide's storage section (see Notes).
 
 **Decision:** : **Option A (MinIO, pinned)**
-**Libraries:** @aws-sdk/client-s3, @aws-sdk/s3-request-presigner
+**Libraries:** @aws-sdk/client-s3, @aws-sdk/s3-request-presigner, @aws-sdk/lib-storage
 
 **Revisions:**
 - 2026-10-10 — `**Libraries:**` field filled with the AWS SDK v3 packages the Recommendation already names (S3 client +
@@ -77,6 +77,9 @@ _Subprojects in scope:_
     - `thumbnails/{videoId}.jpg`: under the public-read prefix (TD-11 D).
   - Uploads are presigned multipart (TD-04 A).
   - Rationale: the brief states the decision is "*como* usá-lo (organização de buckets/chaves, upload pré-assinado), não *qual* storage". Decision A unchanged.
+- 2026-10-11 — `@aws-sdk/lib-storage` added to `**Libraries:**`. The worker uploads the playback MP4 (up to the
+  original's ~10 GB) with `Upload`, because a single `PutObject` is capped at 5 GB. Rationale: bug found in final
+  verification of Phase 03. Decision unchanged.
 
 ---
 
@@ -108,12 +111,14 @@ _Subprojects in scope:_
 **Recommendation:** **Option A (BullMQ + Redis)**. The workload is job-shaped: long-running, retryable, with progress and per-job state the API may read back (TD-14). BullMQ models that natively, and `@nestjs/bullmq` gives the worker (TD-03) a first-party processor abstraction. Redis is a small, well-understood addition, and the testing guide already assumes it. Option B is a legitimate choice if the team prefers zero new infrastructure: its transactional enqueue is a real advantage, paid for with a hand-written integration. Option C buys routing flexibility the project does not need.
 
 **Decision:** **Option A (BullMQ + Redis)**
-**Libraries:** bullmq, @nestjs/bullmq
+**Libraries:** bullmq, @nestjs/bullmq, ioredis
 
 **Revisions:**
 - 2026-10-10 — `**Libraries:**` field filled with `bullmq` and `@nestjs/bullmq`, as the Recommendation names; the
   installed BullMQ major must provide Job Schedulers (`upsertJobScheduler`), which TD-16 relies on. Rationale: resolves
   validation IC-3 — the empty field kept these dependencies out of library-refs.md and doc lookups. Decision A unchanged.
+- 2026-10-11 — `ioredis` added to `**Libraries:**`. BullMQ 6 needs a Redis client; `@nestjs/bullmq` connects through
+  `ioredis`, which is installed as a dependency (`^5.11.1`). Rationale: it was missing from the library cache. Decision A unchanged.
 
 ---
 
@@ -186,6 +191,10 @@ _Subprojects in scope:_
   `CompleteMultipartUpload` and returns `202 Accepted`; the processing trigger and the size check live in the TD-06 B
   storage-event consumer (TD-07 Revision), not in `complete`. Rationale: aligned with the TD-06 B decision. Decision A
   (S3 multipart, presigned parts, API-mediated Create/Complete) unchanged.
+- 2026-10-11 — `complete` is idempotent: if the storage no longer knows the upload id (`NoSuchUpload`/invalid parts)
+  but the original object already exists, the call returns `202` with the current video instead of `400
+  INVALID_UPLOAD_PARTS`. Rationale: a retried `complete` after the object was assembled is not a client error. Decision
+  unchanged.
 
 ---
 

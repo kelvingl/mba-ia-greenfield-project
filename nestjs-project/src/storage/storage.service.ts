@@ -1,0 +1,241 @@
+import { createReadStream, createWriteStream } from 'node:fs';
+import type { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
+import {
+  CompleteMultipartUploadCommand,
+  CreateMultipartUploadCommand,
+  DeleteObjectCommand,
+  GetObjectCommand,
+  HeadObjectCommand,
+  ListPartsCommand,
+  S3Client,
+  UploadPartCommand,
+} from '@aws-sdk/client-s3';
+import { Upload } from '@aws-sdk/lib-storage';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { Inject, Injectable } from '@nestjs/common';
+import type { ConfigType } from '@nestjs/config';
+import storageConfig from '../config/storage.config';
+import { INTERNAL_S3_CLIENT, PUBLIC_S3_CLIENT } from './storage.constants';
+import { InvalidUploadPartsError } from './storage.errors';
+
+export interface UploadedPart {
+  partNumber: number;
+  etag: string;
+  size: number;
+}
+
+export interface PresignedPart {
+  partNumber: number;
+  url: string;
+}
+
+export interface CompletedPartInput {
+  partNumber: number;
+  etag: string;
+}
+
+export interface PresignGetOptions {
+  /** Sets `response-content-disposition`, e.g. `attachment; filename="a.mp4"`. */
+  responseContentDisposition?: string;
+}
+
+/** Error names S3-compatible servers return when the part list is unacceptable. */
+const INVALID_PARTS_ERRORS = new Set([
+  'InvalidPart',
+  'InvalidPartOrder',
+  'EntityTooSmall',
+  'NoSuchUpload',
+]);
+
+@Injectable()
+export class StorageService {
+  constructor(
+    @Inject(INTERNAL_S3_CLIENT) private readonly internalClient: S3Client,
+    @Inject(PUBLIC_S3_CLIENT) private readonly publicClient: S3Client,
+    @Inject(storageConfig.KEY)
+    private readonly config: ConfigType<typeof storageConfig>,
+  ) {}
+
+  /** Seconds a presigned upload-part URL stays valid. */
+  get partUrlTtlSeconds(): number {
+    return this.config.partUrlTtlSeconds;
+  }
+
+  /** Seconds a presigned playback/download URL stays valid. */
+  get deliveryUrlTtlSeconds(): number {
+    return this.config.deliveryUrlTtlSeconds;
+  }
+
+  async createMultipartUpload(
+    key: string,
+    contentType: string,
+  ): Promise<string> {
+    const { UploadId } = await this.internalClient.send(
+      new CreateMultipartUploadCommand({
+        Bucket: this.config.bucket,
+        Key: key,
+        ContentType: contentType,
+      }),
+    );
+    return UploadId as string;
+  }
+
+  /** Presigned PUT URLs for the browser, signed against the public endpoint. */
+  async presignUploadParts(
+    key: string,
+    uploadId: string,
+    partNumbers: number[],
+  ): Promise<PresignedPart[]> {
+    return Promise.all(
+      partNumbers.map(async (partNumber) => ({
+        partNumber,
+        url: await getSignedUrl(
+          this.publicClient,
+          new UploadPartCommand({
+            Bucket: this.config.bucket,
+            Key: key,
+            UploadId: uploadId,
+            PartNumber: partNumber,
+          }),
+          { expiresIn: this.config.partUrlTtlSeconds },
+        ),
+      })),
+    );
+  }
+
+  async listParts(key: string, uploadId: string): Promise<UploadedPart[]> {
+    const parts: UploadedPart[] = [];
+    let marker: string | undefined;
+    do {
+      const page = await this.internalClient.send(
+        new ListPartsCommand({
+          Bucket: this.config.bucket,
+          Key: key,
+          UploadId: uploadId,
+          PartNumberMarker: marker,
+        }),
+      );
+      for (const part of page.Parts ?? []) {
+        parts.push({
+          partNumber: part.PartNumber as number,
+          etag: part.ETag as string,
+          size: part.Size as number,
+        });
+      }
+      marker = page.IsTruncated ? String(page.NextPartNumberMarker) : undefined;
+    } while (marker);
+    return parts;
+  }
+
+  async completeMultipartUpload(
+    key: string,
+    uploadId: string,
+    parts: CompletedPartInput[],
+  ): Promise<void> {
+    try {
+      await this.internalClient.send(
+        new CompleteMultipartUploadCommand({
+          Bucket: this.config.bucket,
+          Key: key,
+          UploadId: uploadId,
+          MultipartUpload: {
+            Parts: parts.map((part) => ({
+              PartNumber: part.partNumber,
+              ETag: part.etag,
+            })),
+          },
+        }),
+      );
+    } catch (error) {
+      if (error instanceof Error && INVALID_PARTS_ERRORS.has(error.name)) {
+        throw new InvalidUploadPartsError(error.name);
+      }
+      throw error;
+    }
+  }
+
+  async headObject(key: string): Promise<{ size: number }> {
+    const head = await this.internalClient.send(
+      new HeadObjectCommand({ Bucket: this.config.bucket, Key: key }),
+    );
+    return { size: head.ContentLength as number };
+  }
+
+  /** False only when the storage answers "not found"; other errors propagate. */
+  async objectExists(key: string): Promise<boolean> {
+    try {
+      await this.headObject(key);
+      return true;
+    } catch (error) {
+      if (error instanceof Error && error.name === 'NotFound') return false;
+      throw error;
+    }
+  }
+
+  async deleteObject(key: string): Promise<void> {
+    await this.internalClient.send(
+      new DeleteObjectCommand({ Bucket: this.config.bucket, Key: key }),
+    );
+  }
+
+  /**
+   * Streams a local file as a multipart upload: a single PutObject is capped at
+   * 5 GB, while playback remuxes of 10 GB originals must fit.
+   */
+  async putObjectFromFile(
+    key: string,
+    filePath: string,
+    contentType: string,
+  ): Promise<void> {
+    await new Upload({
+      client: this.internalClient,
+      params: {
+        Bucket: this.config.bucket,
+        Key: key,
+        Body: createReadStream(filePath),
+        ContentType: contentType,
+      },
+      partSize: this.config.uploadPartSizeBytes,
+    }).done();
+  }
+
+  /** Streams an object to a local file without holding it in memory. */
+  async downloadObjectToFile(key: string, filePath: string): Promise<void> {
+    const { Body } = await this.internalClient.send(
+      new GetObjectCommand({ Bucket: this.config.bucket, Key: key }),
+    );
+    await pipeline(Body as Readable, createWriteStream(filePath));
+  }
+
+  /** Short-lived GET URL for the browser (streaming/download). */
+  presignGet(key: string, options: PresignGetOptions = {}): Promise<string> {
+    return this.signGet(this.publicClient, key, options);
+  }
+
+  /** GET URL reachable from inside the Compose network (ffprobe/ffmpeg input). */
+  presignInternalGet(key: string): Promise<string> {
+    return this.signGet(this.internalClient, key, {});
+  }
+
+  /** Permanent URL of an object under the public-read `thumbnails/` prefix. */
+  publicObjectUrl(key: string): string {
+    return `${this.config.publicEndpoint}/${this.config.bucket}/${key}`;
+  }
+
+  private signGet(
+    client: S3Client,
+    key: string,
+    options: PresignGetOptions,
+  ): Promise<string> {
+    return getSignedUrl(
+      client,
+      new GetObjectCommand({
+        Bucket: this.config.bucket,
+        Key: key,
+        ResponseContentDisposition: options.responseContentDisposition,
+      }),
+      { expiresIn: this.config.deliveryUrlTtlSeconds },
+    );
+  }
+}
