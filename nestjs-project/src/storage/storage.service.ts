@@ -162,6 +162,17 @@ export class StorageService {
     return { size: head.ContentLength as number };
   }
 
+  /** False only when the storage answers "not found"; other errors propagate. */
+  async objectExists(key: string): Promise<boolean> {
+    try {
+      await this.headObject(key);
+      return true;
+    } catch (error) {
+      if (error instanceof Error && error.name === 'NotFound') return false;
+      throw error;
+    }
+  }
+
   async deleteObject(key: string): Promise<void> {
     await this.internalClient.send(
       new DeleteObjectCommand({ Bucket: this.config.bucket, Key: key }),

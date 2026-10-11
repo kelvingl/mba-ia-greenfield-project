@@ -141,7 +141,8 @@ export class VideosService {
   /**
    * Finalizes the multipart upload in the storage. It deliberately does NOT
    * enqueue processing nor verify the size: both happen when the storage event
-   * is consumed (phase-03-videos/TD-04 and TD-06 Revisions).
+   * is consumed (phase-03-videos/TD-04 and TD-06 Revisions). Idempotent: when
+   * the object already exists, a repeated call returns the video as-is.
    */
   async completeUpload(
     userId: string,
@@ -157,6 +158,9 @@ export class VideosService {
       );
     } catch (error) {
       if (error instanceof InvalidUploadPartsError) {
+        // A repeated call after the storage already assembled the object
+        // (the upload id is gone) is a success, not a client error.
+        if (await this.storage.objectExists(video.original_key)) return video;
         throw new InvalidUploadPartsException();
       }
       throw error;

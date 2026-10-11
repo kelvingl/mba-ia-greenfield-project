@@ -140,6 +140,20 @@ describe('StorageService (integration, real MinIO)', () => {
     }
   });
 
+  it('should tell whether an object exists', async () => {
+    const key = 'originals/v-exists/source.mp4';
+    const dir = await mkdtemp(join(tmpdir(), 'storage-'));
+    const file = join(dir, 'in.mp4');
+    await writeFile(file, 'x');
+    try {
+      expect(await service.objectExists(key)).toBe(false);
+      await service.putObjectFromFile(key, file, 'video/mp4');
+      expect(await service.objectExists(key)).toBe(true);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it('should download an object to a local file', async () => {
     const key = 'originals/v-dl/source.mp4';
     const dir = await mkdtemp(join(tmpdir(), 'storage-'));

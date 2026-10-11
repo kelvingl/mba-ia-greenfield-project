@@ -178,6 +178,22 @@ describe('videos-upload', () => {
       expect(await queue.getWaitingCount()).toBe(0);
     });
 
+    it('answers 202 again when complete is repeated after the object exists', async () => {
+      const res = await http()
+        .post(`/videos/${publicId}/upload/complete`)
+        .set(auth(owner.accessToken))
+        .send({
+          parts: [
+            { part_number: 1, etag: etags[0] },
+            { part_number: 2, etag: etags[1] },
+          ],
+        })
+        .expect(202);
+      expect(
+        (res.body as { processing_status: string }).processing_status,
+      ).toBe('uploading');
+    });
+
     // 2.3 rejeita-conclusao-com-etag-adulterado — AC #5
     it('rejects completion with a tampered ETag', async () => {
       const res = await http()

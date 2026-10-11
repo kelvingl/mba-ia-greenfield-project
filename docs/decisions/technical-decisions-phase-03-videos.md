@@ -191,6 +191,10 @@ _Subprojects in scope:_
   `CompleteMultipartUpload` and returns `202 Accepted`; the processing trigger and the size check live in the TD-06 B
   storage-event consumer (TD-07 Revision), not in `complete`. Rationale: aligned with the TD-06 B decision. Decision A
   (S3 multipart, presigned parts, API-mediated Create/Complete) unchanged.
+- 2026-10-11 — `complete` is idempotent: if the storage no longer knows the upload id (`NoSuchUpload`/invalid parts)
+  but the original object already exists, the call returns `202` with the current video instead of `400
+  INVALID_UPLOAD_PARTS`. Rationale: a retried `complete` after the object was assembled is not a client error. Decision
+  unchanged.
 
 ---
 

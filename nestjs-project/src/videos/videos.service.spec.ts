@@ -39,6 +39,7 @@ describe('VideosService', () => {
     presignUploadParts: jest.fn(),
     listParts: jest.fn(),
     completeMultipartUpload: jest.fn(),
+    objectExists: jest.fn(),
     partUrlTtlSeconds: 3600,
     deliveryUrlTtlSeconds: 900,
     publicObjectUrl: jest.fn(),
@@ -338,11 +339,27 @@ describe('VideosService', () => {
         expect(repo.save).not.toHaveBeenCalled();
       });
 
+      it('should succeed again when the object already exists', async () => {
+        repo.findOne.mockResolvedValue(owned());
+        storage.completeMultipartUpload.mockRejectedValue(
+          new InvalidUploadPartsError('NoSuchUpload'),
+        );
+        storage.objectExists.mockResolvedValue(true);
+
+        const video = await service.completeUpload('u', 'p', []);
+
+        expect(storage.objectExists).toHaveBeenCalledWith(
+          'originals/video-1/source.mp4',
+        );
+        expect(video.processing_status).toBe(VideoProcessingStatus.UPLOADING);
+      });
+
       it('should map a storage rejection of the parts to a domain exception', async () => {
         repo.findOne.mockResolvedValue(owned());
         storage.completeMultipartUpload.mockRejectedValue(
           new InvalidUploadPartsError('InvalidPart'),
         );
+        storage.objectExists.mockResolvedValue(false);
 
         await expect(
           service.completeUpload('u', 'p', []),
